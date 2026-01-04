@@ -2,74 +2,95 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="SQM LOGISTICS", layout="wide")
+# Konfiguracja PRO-99
+st.set_page_config(page_title="SQM LOGISTICS PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Twój link do arkusza
+# Custom CSS dla wyglądu "Premium"
+st.markdown("""
+    <style>
+    .main { background-color: #0e1117; }
+    .stDataFrame { border: 1px solid #30363d; border-radius: 10px; }
+    .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; }
+    div[data-testid="stExpander"] { border: none !important; box-shadow: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
-
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
-    # Odczyt danych i usunięcie całkowicie pustych wierszy
     return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
 
 try:
     df = load_data()
+
+    # NAGŁÓWEK PRO
+    col_t, col_s = st.columns([3, 1])
+    with col_t:
+        st.title("🚀 SQM Logistics Operations")
+        st.caption("Barcelona ↔ Poznań Hub | Real-time Sync")
     
-    st.title("🚚 SQM Logistics: Zarządzanie Transportem")
-
-    # --- BOCZNY PANEL FILTROWANIA ---
-    st.sidebar.header("🔍 Szukaj i Filtruj")
+    # KPI - Wskaźniki na górze (wygląd Pro)
+    total = len(df)
+    in_transit = len(df[df['STATUS'] == 'w trasie'])
+    unloaded = len(df[df['STATUS'] == 'ROZŁADOWANY'])
     
-    # Globalna wyszukiwarka (szuka w całej tabeli)
-    search = st.sidebar.text_input("Wyszukaj (Projekt, Auto, Kierowca):")
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    kpi1.metric("Wszystkie transporty", total)
+    kpi2.metric("W trasie", in_transit, delta_color="normal")
+    kpi3.metric("Rozładowane", unloaded, delta=f"{int(unloaded/total*100)}%")
+    kpi4.metric("Pod rampą", len(df[df['STATUS'] == 'pod rampą']))
 
-    # Filtry rozwijane
-    hala_list = ["Wszystkie"] + sorted(df['Hala'].unique().tolist())
-    selected_hala = st.sidebar.selectbox("Hala:", hala_list)
+    st.divider()
 
-    status_list = ["Wszystkie"] + sorted(df['STATUS'].unique().tolist())
-    selected_status = st.sidebar.selectbox("Status:", status_list)
+    # --- FILTROWANIE (Zintegrowane w jednej linii) ---
+    c1, c2, c3 = st.columns([2, 1, 1])
+    with c1:
+        search = st.text_input("🔍 Szybkie wyszukiwanie (Auto, Projekt, Kierowca...)", placeholder="Wpisz cokolwiek...")
+    with c2:
+        hala_filter = st.multiselect("Hala", options=df['Hala'].unique())
+    with c3:
+        status_filter = st.multiselect("Status", options=df['STATUS'].unique())
 
     # Logika filtrów
     filtered_df = df.copy()
     if search:
         filtered_df = filtered_df[filtered_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
-    if selected_hala != "Wszystkie":
-        filtered_df = filtered_df[filtered_df['Hala'] == selected_hala]
-    if selected_status != "Wszystkie":
-        filtered_df = filtered_df[filtered_df['STATUS'] == selected_status]
+    if hala_filter:
+        filtered_df = filtered_df[filtered_df['Hala'].isin(hala_filter)]
+    if status_filter:
+        filtered_df = filtered_df[filtered_df['STATUS'].isin(status_filter)]
 
-    # --- WIDOK GŁÓWNY ---
-    st.subheader(f"Znaleziono: {len(filtered_df)} pozycji")
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    # --- EDYCJA BEZPOŚREDNIO W TABELI (PRO FEATURE) ---
+    st.subheader("📋 Rejestr Operacyjny")
+    st.info("💡 Kliknij dwukrotnie w komórkę STATUS, aby ją zmienić. Po edycji kliknij 'Zatwierdź zmiany' pod tabelą.")
 
-    st.divider()
+    # Konfiguracja edytora kolumn
+    updated_df = st.data_editor(
+        filtered_df,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Data", "Nr Slotu", "Godzina", "Hala", "Przewoźnik", "Auto", "Kierowca", "Nr Proj.", "Nazwa Projektu", "Foto1"], # Tylko STATUS edytowalny
+        column_config={
+            "STATUS": st.column_config.SelectboxColumn(
+                "STATUS",
+                help="Zmień status operacyjny",
+                options=["status-planned", "w trasie", "pod rampą", "ROZŁADOWANY", "ZAŁADOWANY-POWRÓT"],
+                required=True,
+            ),
+            "Foto1": st.column_config.LinkColumn("Zdjęcie")
+        },
+        key="main_editor"
+    )
 
-    # --- AKTUALIZACJA STATUSU ---
-    if not filtered_df.empty:
-        st.subheader("📝 Zmiana statusu")
-        
-        # Wybór wiersza na podstawie kombinacji Nazwy Projektu i Auta, żeby nie było pomyłek
-        options = filtered_df.apply(lambda x: f"{x['Nazwa Projektu']} | {x['Auto']} ({x['Kierowca']})", axis=1).tolist()
-        selection = st.selectbox("Wybierz transport do aktualizacji:", options)
-        
-        # Pobieramy index wybranego wiersza
-        selected_index = filtered_df.index[options.index(selection)]
-        
-        new_status = st.selectbox("Ustaw nowy status:", 
-                                 ["status-planned", "w trasie", "pod rampą", "ROZŁADOWANY", "ZAŁADOWANY-POWRÓT"])
-        
-        if st.button("Zapisz zmiany w systemie"):
-            # Zmiana statusu w głównym DataFrame
-            df.at[selected_index, 'STATUS'] = new_status
+    # Przycisk zapisu (widoczny tylko gdy dane się zmieniły)
+    if not updated_df.equals(filtered_df):
+        if st.button("💾 ZATWIERDŹ ZMIANY I SYNCHRONIZUJ", type="primary", use_container_width=True):
+            # Łączymy zmienione dane z oryginalnym DF (żeby zachować wiersze, które odfiltrowaliśmy)
+            df.update(updated_df)
             conn.update(spreadsheet=URL, data=df)
-            st.success(f"Zaktualizowano: {selection} na status {new_status}")
+            st.success("Dane zsynchronizowane z Google Sheets!")
             st.rerun()
-    else:
-        st.info("Brak transportów spełniających wybrane kryteria.")
 
 except Exception as e:
-    st.error("Nie udało się poprawnie wczytać arkusza.")
-    st.write("Sprawdź, czy nazwy kolumn w Google Sheets są identyczne jak w kodzie (Data, Nr Slotu, Godzina, Hala, Przewoźnik, Auto, Kierowca, Nr Proj., Nazwa Projektu, STATUS, Foto1)")
-    st.exception(e)
+    st.error(f"Krytyczny błąd aplikacji: {e}")
