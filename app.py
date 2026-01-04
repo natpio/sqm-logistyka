@@ -4,51 +4,78 @@ import pandas as pd
 
 st.set_page_config(page_title="SQM LOGISTICS", layout="wide")
 
-# Twój link do arkusza
+# Link do arkusza
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
 
-# Połączenie
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Funkcja odczytu danych
 def load_data():
-    # Pobieramy dane bez zapamiętywania (cache), żeby zawsze były świeże
-    return conn.read(spreadsheet=URL, ttl=0)
+    return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
 
 try:
+    # Pobieranie danych
     df = load_data()
     
-    st.title("🚚 SQM Logistics: Poznań - Barcelona")
+    st.title("🚚 Zarządzanie Transportem SQM")
 
-    # 1. PODGLĄD CAŁEJ TABELI (Sprawdzenie czy dane płyną)
-    st.subheader("Podgląd arkusza (wszystkie dane)")
-    st.dataframe(df)
+    # --- PANEL BOCZNY (FILTROWANIE) ---
+    st.sidebar.header("🔍 Filtry")
+    
+    # 1. Wyszukiwarka ogólna (po dowolnym tekście)
+    search_query = st.sidebar.text_input("Szukaj (np. nr projektu, auto, hala):")
+
+    # 2. Filtry dynamiczne (wyciągają unikalne wartości z kolumn)
+    # Zakładam nazwy kolumn na podstawie Twojego pliku: 'Data', 'Hala', 'STATUS'
+    all_dates = ["Wszystkie"] + sorted(df['Data'].astype(str).unique().tolist())
+    selected_date = st.sidebar.selectbox("Filtruj po dacie:", all_dates)
+
+    all_hallas = ["Wszystkie"] + sorted(df['Hala'].astype(str).unique().tolist())
+    selected_hala = st.sidebar.selectbox("Filtruj po hali:", all_hallas)
+
+    all_statuses = ["Wszystkie"] + sorted(df['STATUS'].astype(str).unique().tolist())
+    selected_status = st.sidebar.selectbox("Filtruj po statusie:", all_statuses)
+
+    # --- LOGIKA FILTROWANIA ---
+    filtered_df = df.copy()
+
+    if search_query:
+        # Przeszukuje cały arkusz pod kątem wpisanej frazy
+        filtered_df = filtered_df[filtered_df.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)]
+
+    if selected_date != "Wszystkie":
+        filtered_df = filtered_df[filtered_df['Data'].astype(str) == selected_date]
+
+    if selected_hala != "Wszystkie":
+        filtered_df = filtered_df[filtered_df['Hala'].astype(str) == selected_hala]
+
+    if selected_status != "Wszystkie":
+        filtered_df = filtered_df[filtered_df['STATUS'].astype(str) == selected_status]
+
+    # --- WIDOK GŁÓWNY ---
+    st.subheader(f"Znaleziono pozycji: {len(filtered_df)}")
+    
+    # Wyświetlenie tabeli (z możliwością sortowania przez kliknięcie w nagłówek)
+    st.dataframe(filtered_df, use_container_width=True)
 
     st.divider()
 
-    # 2. PROSTA EDYCJA STATUSU
-    st.subheader("Aktualizacja statusu")
-    
-    # Wybieramy auto z pierwszej kolumny
-    lista_aut = df.iloc[:, 0].tolist()
-    wybrane_auto = st.selectbox("Wybierz auto/zlecenie:", lista_aut)
-    
-    nowy_status = st.radio("Zmień status na:", ["W trasie", "Czeka na rozładunek", "ROZŁADOWANY", "ZAŁADOWANY - POWRÓT"])
-
-    if st.button("Zapisz w Google Sheets"):
-        # Znajdujemy wiersz dla wybranego auta i zmieniamy mu status w kolumnie 'Status'
-        df.loc[df.iloc[:, 0] == wybrane_auto, 'Status'] = nowy_status
+    # --- EDYCJA STATUSU DLA PRZELTROWANYCH DANYCH ---
+    if len(filtered_df) > 0:
+        st.subheader("📝 Szybka zmiana statusu")
+        # Wybieramy ID z przefiltrowanej listy
+        selected_id = st.selectbox("Wybierz ID wiersza do aktualizacji:", filtered_df['ID'].tolist())
         
-        # Wysyłamy całą zaktualizowaną tabelę z powrotem do Google
-        conn.update(spreadsheet=URL, data=df)
-        st.success(f"Zmieniono status dla {wybrane_auto} na: {nowy_status}")
-        # Odświeżamy aplikację, żeby pokazała nowe dane
-        st.rerun()
+        new_status = st.selectbox("Ustaw nowy status:", ["status-planned", "w trasie", "pod rampą", "ROZŁADOWANY", "ZAŁADOWANY-POWRÓT"])
+        
+        if st.button("Zapisz zmianę"):
+            # Aktualizacja w pełnym DataFrame
+            df.loc[df['ID'] == selected_id, 'STATUS'] = new_status
+            conn.update(spreadsheet=URL, data=df)
+            st.success(f"Zaktualizowano wiersz {selected_id}")
+            st.rerun()
+    else:
+        st.warning("Brak danych spełniających kryteria filtrów.")
 
 except Exception as e:
-    st.error("Błąd zaczytywania danych.")
-    st.write("Sprawdź czy:")
-    st.write("1. Arkusz ma nagłówki w 1. wierszu.")
-    st.write("2. Jedna z kolumn nazywa się dokładnie 'Status'.")
-    st.write("3. Link do arkusza jest poprawny.")
-    st.exception(e)
+    st.error(f"Problem z danymi: {e}")
+    st.info("Upewnij się, że nagłówki w Google Sheets to: ID, Data, Hala, STATUS itd.")
