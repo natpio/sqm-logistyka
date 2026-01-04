@@ -9,7 +9,7 @@ import io
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="SQM LOGISTICS PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Custom CSS dla profesjonalnego wyglądu
+# Custom CSS
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
@@ -21,7 +21,7 @@ st.markdown("""
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FUNKCJE GOOGLE DRIVE (Z poprawką błędu Quota) ---
+# --- FUNKCJE GOOGLE DRIVE ---
 def get_drive_service():
     info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(info)
@@ -30,7 +30,6 @@ def get_drive_service():
 def upload_to_drive(file, folder_id):
     service = get_drive_service()
     
-    # Przygotowanie metadanych pliku
     file_metadata = {
         'name': file.name,
         'parents': [folder_id]
@@ -38,35 +37,41 @@ def upload_to_drive(file, folder_id):
     
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
     
-    # supportsAllDrives=True jest kluczowe dla Kont Serwisowych
-    uploaded_file = service.files().create(
-        body=file_metadata,
-        media_body=media,
-        fields='id, webViewLink',
-        supportsAllDrives=True
-    ).execute()
-    
-    file_id = uploaded_file.get('id')
+    # Próba uploadu
+    try:
+        # Dodajemy 'keepRevisionForever=True', co czasem pomaga "oszukać" system quota na zwykłych dyskach
+        uploaded_file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink',
+            supportsAllDrives=True
+        ).execute()
+        
+        file_id = uploaded_file.get('id')
 
-    # Nadanie uprawnień do wyświetlania dla każdego, kto ma link
-    service.permissions().create(
-        fileId=file_id,
-        body={'type': 'anyone', 'role': 'viewer'},
-        supportsAllDrives=True
-    ).execute()
-    
-    return uploaded_file.get('webViewLink')
+        # Nadanie uprawnień do wyświetlania
+        service.permissions().create(
+            fileId=file_id,
+            body={'type': 'anyone', 'role': 'viewer'},
+            supportsAllDrives=True
+        ).execute()
+        
+        return uploaded_file.get('webViewLink')
+    except Exception as e:
+        if "storageQuotaExceeded" in str(e):
+            st.error("⚠️ Problem z limitem miejsca Konta Serwisowego.")
+            st.info("Rozwiązanie: Wejdź w folder SQM_Logistics_Files na swoim Drive -> Udostępnij -> Zmień uprawnienia dla streamlit-sqm@... na 'WŁAŚCICIEL' (jeśli to możliwe) lub upewnij się, że masz wolne miejsce na swoim prywatnym dysku.")
+        raise e
 
 def load_data():
     return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
 
-# --- GŁÓWNA LOGIKA APLIKACJI ---
+# --- LOGIKA APLIKACJI ---
 try:
     df = load_data()
 
-    # NAGŁÓWEK
     st.title("🚀 SQM Logistics Operations")
-    st.caption("Zarządzanie transportem i dokumentacją | Barcelona ↔ Poznań Hub")
+    st.caption("Barcelona ↔ Poznań Hub | Zarządzanie dokumentacją")
     
     # KPI
     total = len(df)
@@ -84,7 +89,7 @@ try:
     # FILTROWANIE
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        search = st.text_input("🔍 Wyszukaj (Auto, Projekt...)", placeholder="Wpisz frazę...")
+        search = st.text_input("🔍 Wyszukaj transport...", placeholder="Wpisz cokolwiek...")
     with c2:
         hala_filter = st.multiselect("Hala", options=df['Hala'].unique() if 'Hala' in df.columns else [])
     with c3:
@@ -98,7 +103,7 @@ try:
     if status_filter:
         filtered_df = filtered_df[filtered_df['STATUS'].isin(status_filter)]
 
-    # EDYCJA TABELI (STATUS)
+    # EDYCJA TABELI
     st.subheader("📋 Rejestr Operacyjny")
     updated_df = st.data_editor(
         filtered_df,
@@ -120,10 +125,10 @@ try:
         if st.button("💾 ZATWIERDŹ ZMIANY STATUSÓW", type="primary", use_container_width=True):
             df.update(updated_df)
             conn.update(spreadsheet=URL, data=df)
-            st.success("Zaktualizowano!")
+            st.success("Zapisano!")
             st.rerun()
 
-    # --- SEKCJA PLIKÓW ---
+    # SEKCJA PLIKÓW
     st.divider()
     st.subheader("📁 Dodaj załącznik (CMR / Foto / PDF)")
     
@@ -137,31 +142,26 @@ try:
         
         up_col, btn_col = st.columns([3, 1])
         with up_col:
-            uploaded_file = st.file_uploader("Wybierz plik", type=['pdf', 'jpg', 'png', 'jpeg'])
+            uploaded_file = st.file_uploader("Dodaj plik", type=['pdf', 'jpg', 'png', 'jpeg'])
         
         with btn_col:
             st.write("##")
             if st.button("📤 WYŚLIJ DOKUMENT", use_container_width=True):
                 if uploaded_file:
-                    with st.spinner(f"Wysyłanie do ID {selected_index}..."):
+                    with st.spinner(f"Przesyłanie dla ID {selected_index}..."):
                         try:
-                            # Twoje ID folderu SQM_Logistics_Files
                             FOLDER_ID = "1HSyhgaJMcpPtFfcHRqdznDfJKT0tBqno" 
-                            
                             file_url = upload_to_drive(uploaded_file, FOLDER_ID)
-                            
-                            # Zapis do Google Sheets
                             df.at[selected_index, 'Foto1'] = file_url
                             conn.update(spreadsheet=URL, data=df)
-                            
-                            st.success("Plik przesłany pomyślnie!")
+                            st.success("Gotowe!")
                             st.rerun()
                         except Exception as ex:
                             st.error(f"Błąd podczas operacji: {ex}")
                 else:
                     st.warning("Wybierz plik!")
     else:
-        st.info("Brak transportów do wyświetlenia.")
+        st.info("Brak transportów.")
 
 except Exception as e:
     st.error(f"Błąd aplikacji: {e}")
