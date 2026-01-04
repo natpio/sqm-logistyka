@@ -1,14 +1,10 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import datetime
 
-st.set_page_config(page_title="SQM LOGISTICS", layout="wide")
+st.set_page_config(page_title="SQM Logistics", layout="wide")
 
-# Link do arkusza
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
-
-# Połączenie
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_data():
@@ -17,49 +13,56 @@ def get_data():
 try:
     df = get_data()
     
-    st.title("🚛 Operacje: Barcelona ↔ Poznań")
-    st.markdown("---")
+    st.title("🚛 System Logistyczny SQM: POZ ↔ BCN")
+    
+    # Podział na dwa panele (Poznań i Barcelona) dla przejrzystości
+    tab1, tab2 = st.tabs(["🇵🇱 PANEL POZNAŃ (Załadunek)", "🇪🇸 PANEL BARCELONA (Rozładunek/Powroty)"])
 
-    # --- WIDOK KART (DLA KAŻDEGO AUTA) ---
-    # Iterujemy przez wiersze arkusza
-    for index, row in df.iterrows():
-        # Stylizacja karty (wizualne oddzielenie aut)
-        with st.container():
-            col_info, col_action, col_photo = st.columns([2, 2, 2])
-            
-            with col_info:
-                st.subheader(f"📍 {row.iloc[0]}") # Pierwsza kolumna (np. Numer auta)
-                st.write(f"**Kierowca:** {row.get('Kierowca', 'Brak danych')}")
-                st.write(f"**Slot:** {row.get('Slot', '---')}")
-                current_status = row.get('Status', 'Nieokreślony')
-                st.info(f"Obecny status: **{current_status}**")
+    with tab1:
+        st.header("Planowanie i Wysyłka")
+        # Wybór zamówienia do edycji
+        order_id = st.selectbox("Wybierz nr zamówienia/auta do opisania:", df.iloc[:, 0].tolist())
+        
+        col_a, col_b = st.columns(2)
+        with col_a:
+            eta = st.text_input("Planowany przyjazd (ETA):", placeholder="np. Poniedziałek 14:00")
+            desc = st.text_area("Co jest na aucie? (Uwagi dla Barcelony):")
+        with col_b:
+            img_url = st.text_input("Link do zdjęcia paki (np. z Google Drive/Dropbox):")
+            if st.button("Wyślij dane do Barcelony"):
+                df.loc[df.iloc[:, 0] == order_id, 'ETA'] = eta
+                df.loc[df.iloc[:, 0] == order_id, 'Uwagi'] = desc
+                df.loc[df.iloc[:, 0] == order_id, 'Foto_Link'] = img_url
+                conn.update(spreadsheet=URL, data=df)
+                st.success("Logistyk w Barcelonie otrzymał powiadomienie!")
 
-            with col_action:
-                st.write("**Zmień status:**")
-                # Przyciski akcji - duże i wygodne
-                if st.button(f"✅ ROZŁADOWANY", key=f"unl_{index}"):
-                    df.at[index, 'Status'] = "ROZŁADOWANY"
-                    conn.update(spreadsheet=URL, data=df)
-                    st.success("Zapisano!")
-                    st.rerun()
+    with tab2:
+        st.header("Statusy w Barcelonie")
+        # Grupowanie po Auto/Kierowca, żeby nie było chaosu przy wielu zamówieniach
+        # Zakładam, że kolumna 0 to Numer Auta
+        unique_trucks = df.iloc[:, 0].unique()
+        
+        for truck in unique_trucks:
+            truck_orders = df[df.iloc[:, 0] == truck]
+            with st.expander(f"🚚 AUTO: {truck} (Zamówień: {len(truck_orders)})"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.write("**Szczegóły ładunku:**")
+                    st.table(truck_orders[['Kierowca', 'Slot', 'Status']])
+                    st.warning(f"📌 Uwagi z Poznania: {truck_orders['Uwagi'].iloc[0]}")
                 
-                if st.button(f"🏗️ ZAŁADOWANY / POWRÓT", key=f"load_{index}"):
-                    df.at[index, 'Status'] = "ZAŁADOWANY"
-                    conn.update(spreadsheet=URL, data=df)
-                    st.success("Zapisano!")
-                    st.rerun()
-
-            with col_photo:
-                st.write("**Zdjęcia załadunku:**")
-                uploaded_file = st.file_uploader("Dodaj zdjęcie (JPG/PNG)", type=['png', 'jpg', 'jpeg'], key=f"img_{index}")
-                if uploaded_file:
-                    st.image(uploaded_file, width=150)
-                    if st.button("Wyślij zdjęcie", key=f"send_{index}"):
-                        # Tutaj logistyka zapisu - na razie potwierdzenie
-                        st.success("Zdjęcie wysłane do bazy (Poznań)")
-
-            st.markdown("---") # Linia oddzielająca auta
+                with c2:
+                    if truck_orders['Foto_Link'].iloc[0]:
+                        st.image(truck_orders['Foto_Link'].iloc[0], caption="Zdjęcie załadunku z Poznania", width=250)
+                    
+                    new_stat = st.selectbox("Zmień status auta:", 
+                                         ["Załadowane w POZ", "Czeka na rozładunek", "ROZŁADOWANE", "ZAŁADOWANE - POWRÓT"],
+                                         key=f"status_{truck}")
+                    
+                    if st.button(f"Aktualizuj status {truck}", key=f"btn_{truck}"):
+                        df.loc[df.iloc[:, 0] == truck, 'Status'] = new_stat
+                        conn.update(spreadsheet=URL, data=df)
+                        st.rerun()
 
 except Exception as e:
-    st.error(f"Problem z arkuszem: {e}")
-    st.info("Sprawdź czy kolumny w Sheets nazywają się dokładnie: 'Kierowca', 'Slot', 'Status'")
+    st.error(f"Skonfiguruj nagłówki w Arkuszu: {e}")
