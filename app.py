@@ -2,67 +2,53 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="SQM Logistics", layout="wide")
+st.set_page_config(page_title="SQM LOGISTICS", layout="wide")
 
+# Twój link do arkusza
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
+
+# Połączenie
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-def get_data():
-    return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
+# Funkcja odczytu danych
+def load_data():
+    # Pobieramy dane bez zapamiętywania (cache), żeby zawsze były świeże
+    return conn.read(spreadsheet=URL, ttl=0)
 
 try:
-    df = get_data()
+    df = load_data()
     
-    st.title("🚛 System Logistyczny SQM: POZ ↔ BCN")
+    st.title("🚚 SQM Logistics: Poznań - Barcelona")
+
+    # 1. PODGLĄD CAŁEJ TABELI (Sprawdzenie czy dane płyną)
+    st.subheader("Podgląd arkusza (wszystkie dane)")
+    st.dataframe(df)
+
+    st.divider()
+
+    # 2. PROSTA EDYCJA STATUSU
+    st.subheader("Aktualizacja statusu")
     
-    # Podział na dwa panele (Poznań i Barcelona) dla przejrzystości
-    tab1, tab2 = st.tabs(["🇵🇱 PANEL POZNAŃ (Załadunek)", "🇪🇸 PANEL BARCELONA (Rozładunek/Powroty)"])
+    # Wybieramy auto z pierwszej kolumny
+    lista_aut = df.iloc[:, 0].tolist()
+    wybrane_auto = st.selectbox("Wybierz auto/zlecenie:", lista_aut)
+    
+    nowy_status = st.radio("Zmień status na:", ["W trasie", "Czeka na rozładunek", "ROZŁADOWANY", "ZAŁADOWANY - POWRÓT"])
 
-    with tab1:
-        st.header("Planowanie i Wysyłka")
-        # Wybór zamówienia do edycji
-        order_id = st.selectbox("Wybierz nr zamówienia/auta do opisania:", df.iloc[:, 0].tolist())
+    if st.button("Zapisz w Google Sheets"):
+        # Znajdujemy wiersz dla wybranego auta i zmieniamy mu status w kolumnie 'Status'
+        df.loc[df.iloc[:, 0] == wybrane_auto, 'Status'] = nowy_status
         
-        col_a, col_b = st.columns(2)
-        with col_a:
-            eta = st.text_input("Planowany przyjazd (ETA):", placeholder="np. Poniedziałek 14:00")
-            desc = st.text_area("Co jest na aucie? (Uwagi dla Barcelony):")
-        with col_b:
-            img_url = st.text_input("Link do zdjęcia paki (np. z Google Drive/Dropbox):")
-            if st.button("Wyślij dane do Barcelony"):
-                df.loc[df.iloc[:, 0] == order_id, 'ETA'] = eta
-                df.loc[df.iloc[:, 0] == order_id, 'Uwagi'] = desc
-                df.loc[df.iloc[:, 0] == order_id, 'Foto_Link'] = img_url
-                conn.update(spreadsheet=URL, data=df)
-                st.success("Logistyk w Barcelonie otrzymał powiadomienie!")
-
-    with tab2:
-        st.header("Statusy w Barcelonie")
-        # Grupowanie po Auto/Kierowca, żeby nie było chaosu przy wielu zamówieniach
-        # Zakładam, że kolumna 0 to Numer Auta
-        unique_trucks = df.iloc[:, 0].unique()
-        
-        for truck in unique_trucks:
-            truck_orders = df[df.iloc[:, 0] == truck]
-            with st.expander(f"🚚 AUTO: {truck} (Zamówień: {len(truck_orders)})"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.write("**Szczegóły ładunku:**")
-                    st.table(truck_orders[['Kierowca', 'Slot', 'Status']])
-                    st.warning(f"📌 Uwagi z Poznania: {truck_orders['Uwagi'].iloc[0]}")
-                
-                with c2:
-                    if truck_orders['Foto_Link'].iloc[0]:
-                        st.image(truck_orders['Foto_Link'].iloc[0], caption="Zdjęcie załadunku z Poznania", width=250)
-                    
-                    new_stat = st.selectbox("Zmień status auta:", 
-                                         ["Załadowane w POZ", "Czeka na rozładunek", "ROZŁADOWANE", "ZAŁADOWANE - POWRÓT"],
-                                         key=f"status_{truck}")
-                    
-                    if st.button(f"Aktualizuj status {truck}", key=f"btn_{truck}"):
-                        df.loc[df.iloc[:, 0] == truck, 'Status'] = new_stat
-                        conn.update(spreadsheet=URL, data=df)
-                        st.rerun()
+        # Wysyłamy całą zaktualizowaną tabelę z powrotem do Google
+        conn.update(spreadsheet=URL, data=df)
+        st.success(f"Zmieniono status dla {wybrane_auto} na: {nowy_status}")
+        # Odświeżamy aplikację, żeby pokazała nowe dane
+        st.rerun()
 
 except Exception as e:
-    st.error(f"Skonfiguruj nagłówki w Arkuszu: {e}")
+    st.error("Błąd zaczytywania danych.")
+    st.write("Sprawdź czy:")
+    st.write("1. Arkusz ma nagłówki w 1. wierszu.")
+    st.write("2. Jedna z kolumn nazywa się dokładnie 'Status'.")
+    st.write("3. Link do arkusza jest poprawny.")
+    st.exception(e)
