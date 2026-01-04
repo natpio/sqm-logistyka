@@ -3,27 +3,29 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from google.oauth2 import service_account
 import io
 
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="SQM LOGISTICS PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Custom CSS dla wyglądu operacyjnego
+# Custom CSS
 st.markdown("""
     <style>
     .main { background-color: #0e1117; }
     .stDataFrame { border: 1px solid #30363d; border-radius: 10px; }
     .stMetric { background-color: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 10px; }
-    div[data-testid="stExpander"] { border: none !important; box-shadow: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FUNKCJE GOOGLE DRIVE (Obsługa plików) ---
+# --- POPRAWIONA FUNKCJA GOOGLE DRIVE ---
 def get_drive_service():
-    creds = conn._instance._creds
+    # Pobieramy dane bezpośrednio z Twoich Secrets
+    info = st.secrets["connections"]["gsheets"]
+    creds = service_account.Credentials.from_service_account_info(info)
     return build('drive', 'v3', credentials=creds)
 
 def upload_to_drive(file, folder_id):
@@ -32,23 +34,20 @@ def upload_to_drive(file, folder_id):
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
     uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
     
+    # Udostępnienie pliku
     service.permissions().create(fileId=uploaded_file.get('id'), body={'type': 'anyone', 'role': 'viewer'}).execute()
     return uploaded_file.get('webViewLink')
 
 def load_data():
-    # Pobieramy dane i dodajemy pomocniczą kolumnę z ID (numerem wiersza)
-    data = conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
-    return data
+    return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
 
-# --- GŁÓWNA LOGIKA APLIKACJI ---
+# --- GŁÓWNA LOGIKA ---
 try:
     df = load_data()
 
-    # NAGŁÓWEK OPERACYJNY
-    col_t, col_s = st.columns([3, 1])
-    with col_t:
-        st.title("🚀 SQM Logistics Operations")
-        st.caption("Zarządzanie transportem i dokumentacją | Barcelona ↔ Poznań Hub")
+    # NAGŁÓWEK
+    st.title("🚀 SQM Logistics Operations")
+    st.caption("Zarządzanie transportem | Barcelona ↔ Poznań Hub")
     
     # KPI
     total = len(df)
@@ -63,10 +62,10 @@ try:
 
     st.divider()
 
-    # --- PANEL FILTROWANIA ---
+    # FILTROWANIE
     c1, c2, c3 = st.columns([2, 1, 1])
     with c1:
-        search = st.text_input("🔍 Wyszukaj (Auto, Kierowca, Projekt...)", placeholder="Wpisz szukaną frazę...")
+        search = st.text_input("🔍 Wyszukaj (Auto, Projekt...)", placeholder="Wpisz frazę...")
     with c2:
         hala_filter = st.multiselect("Hala", options=df['Hala'].unique())
     with c3:
@@ -80,13 +79,12 @@ try:
     if status_filter:
         filtered_df = filtered_df[filtered_df['STATUS'].isin(status_filter)]
 
-    # --- EDYCJA STATUSÓW ---
+    # EDYCJA TABELI
     st.subheader("📋 Rejestr Transportowy")
-    
     updated_df = st.data_editor(
         filtered_df,
         use_container_width=True,
-        hide_index=False, # Pokazujemy index jako ID wiersza
+        hide_index=False,
         disabled=["Data", "Nr Slotu", "Godzina", "Hala", "Przewoźnik", "Auto", "Kierowca", "Nr Proj.", "Nazwa Projektu", "Foto1"],
         column_config={
             "STATUS": st.column_config.SelectboxColumn(
@@ -103,18 +101,15 @@ try:
         if st.button("💾 ZATWIERDŹ ZMIANY STATUSÓW", type="primary", use_container_width=True):
             df.update(updated_df)
             conn.update(spreadsheet=URL, data=df)
-            st.success("Statusy zaktualizowane!")
+            st.success("Zaktualizowano statusy!")
             st.rerun()
 
-    # --- SEKCJA PRZESYŁANIA PLIKÓW (G-DRIVE) PO NUMERZE WIERSZA (ID) ---
+    # --- SEKCJA PLIKÓW PO ID ---
     st.divider()
-    st.subheader("📁 Dodaj załącznik (CMR / Zdjęcie / PDF)")
+    st.subheader("📁 Dodaj załącznik (CMR / Foto)")
     
     if not filtered_df.empty:
-        # POBIERAMY INDEXY Z PRZEFILTROWANEJ TABELI
         transport_options = filtered_df.index.tolist()
-        
-        # WYBÓR PO ID (INDEXIE)
         selected_index = st.selectbox(
             "Wybierz ID transportu (numer wiersza):",
             options=transport_options,
@@ -123,31 +118,27 @@ try:
         
         up_col, btn_col = st.columns([3, 1])
         with up_col:
-            uploaded_file = st.file_uploader("Wybierz plik dokumentacji", type=['pdf', 'jpg', 'png', 'jpeg'])
+            uploaded_file = st.file_uploader("Wybierz plik", type=['pdf', 'jpg', 'png', 'jpeg'])
         
         with btn_col:
             st.write("##")
             if st.button("📤 WYŚLIJ DOKUMENT", use_container_width=True):
                 if uploaded_file:
-                    with st.spinner(f"Przesyłanie dla transportu ID {selected_index}..."):
+                    with st.spinner(f"Wysyłanie dla ID {selected_index}..."):
                         try:
-                            # --- WPISZ TUTAJ SWOJE ID FOLDERU ---
+                            # WPISZ TU ID TWOJEGO FOLDERU: SQM_Logistics_Files
                             FOLDER_ID = "WPISZ_TUTAJ_ID_FOLDERU" 
                             
                             file_url = upload_to_drive(uploaded_file, FOLDER_ID)
-                            
-                            # Precyzyjny zapis do wiersza o konkretnym ID
                             df.at[selected_index, 'Foto1'] = file_url
                             conn.update(spreadsheet=URL, data=df)
                             
-                            st.success(f"Plik przypisany do wiersza ID {selected_index}!")
+                            st.success(f"Plik przypisany do ID {selected_index}!")
                             st.rerun()
                         except Exception as ex:
-                            st.error(f"Błąd: {ex}")
-                else:
-                    st.warning("Najpierw wskaż plik.")
+                            st.error(f"Błąd wysyłki: {ex}")
     else:
-        st.info("Brak transportów w widoku.")
+        st.info("Brak transportów.")
 
 except Exception as e:
     st.error(f"Krytyczny błąd: {e}")
