@@ -23,7 +23,6 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 
 # --- FUNKCJE GOOGLE DRIVE (Obsługa plików) ---
 def get_drive_service():
-    # Pobiera poświadczenia z konfiguracji połączenia gsheets
     creds = conn._instance._creds
     return build('drive', 'v3', credentials=creds)
 
@@ -33,12 +32,13 @@ def upload_to_drive(file, folder_id):
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=True)
     uploaded_file = service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
     
-    # Automatyczne udostępnienie pliku do odczytu dla każdego z linkiem
     service.permissions().create(fileId=uploaded_file.get('id'), body={'type': 'anyone', 'role': 'viewer'}).execute()
     return uploaded_file.get('webViewLink')
 
 def load_data():
-    return conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
+    # Pobieramy dane i dodajemy pomocniczą kolumnę z ID (numerem wiersza)
+    data = conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
+    return data
 
 # --- GŁÓWNA LOGIKA APLIKACJI ---
 try:
@@ -50,7 +50,7 @@ try:
         st.title("🚀 SQM Logistics Operations")
         st.caption("Zarządzanie transportem i dokumentacją | Barcelona ↔ Poznań Hub")
     
-    # KPI - Statystyki na żywo
+    # KPI
     total = len(df)
     in_transit = len(df[df['STATUS'] == 'w trasie'])
     unloaded = len(df[df['STATUS'] == 'ROZŁADOWANY'])
@@ -72,7 +72,6 @@ try:
     with c3:
         status_filter = st.multiselect("Status", options=df['STATUS'].unique())
 
-    # Zastosowanie filtrów
     filtered_df = df.copy()
     if search:
         filtered_df = filtered_df[filtered_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
@@ -87,7 +86,7 @@ try:
     updated_df = st.data_editor(
         filtered_df,
         use_container_width=True,
-        hide_index=False,
+        hide_index=False, # Pokazujemy index jako ID wiersza
         disabled=["Data", "Nr Slotu", "Godzina", "Hala", "Przewoźnik", "Auto", "Kierowca", "Nr Proj.", "Nazwa Projektu", "Foto1"],
         column_config={
             "STATUS": st.column_config.SelectboxColumn(
@@ -104,20 +103,22 @@ try:
         if st.button("💾 ZATWIERDŹ ZMIANY STATUSÓW", type="primary", use_container_width=True):
             df.update(updated_df)
             conn.update(spreadsheet=URL, data=df)
-            st.success("Statusy zaktualizowane pomyślnie!")
+            st.success("Statusy zaktualizowane!")
             st.rerun()
 
-    # --- SEKCJA PRZESYŁANIA PLIKÓW (G-DRIVE) ---
+    # --- SEKCJA PRZESYŁANIA PLIKÓW (G-DRIVE) PO NUMERZE WIERSZA (ID) ---
     st.divider()
     st.subheader("📁 Dodaj załącznik (CMR / Zdjęcie / PDF)")
     
     if not filtered_df.empty:
-        # Wybór transportu na podstawie widocznej powyżej tabeli
+        # POBIERAMY INDEXY Z PRZEFILTROWANEJ TABELI
         transport_options = filtered_df.index.tolist()
+        
+        # WYBÓR PO ID (INDEXIE)
         selected_index = st.selectbox(
-            "Wybierz transport z listy do aktualizacji:",
+            "Wybierz ID transportu (numer wiersza):",
             options=transport_options,
-            format_func=lambda x: f"{df.loc[x, 'Auto']} | {df.loc[x, 'Nazwa Projektu']} | {df.loc[x, 'STATUS']}"
+            format_func=lambda x: f"ID: {x} | Auto: {df.loc[x, 'Auto']} | Projekt: {df.loc[x, 'Nazwa Projektu']}"
         )
         
         up_col, btn_col = st.columns([3, 1])
@@ -125,28 +126,28 @@ try:
             uploaded_file = st.file_uploader("Wybierz plik dokumentacji", type=['pdf', 'jpg', 'png', 'jpeg'])
         
         with btn_col:
-            st.write("##") # Odstęp
+            st.write("##")
             if st.button("📤 WYŚLIJ DOKUMENT", use_container_width=True):
                 if uploaded_file:
-                    with st.spinner("Trwa wysyłanie na Google Drive..."):
+                    with st.spinner(f"Przesyłanie dla transportu ID {selected_index}..."):
                         try:
-                            # --- TUTAJ WKLEJ SWOJE ID FOLDERU ---
+                            # --- WPISZ TUTAJ SWOJE ID FOLDERU ---
                             FOLDER_ID = "WPISZ_TUTAJ_ID_FOLDERU" 
                             
                             file_url = upload_to_drive(uploaded_file, FOLDER_ID)
                             
-                            # Zapis linku do kolumny Foto1 w Google Sheets
+                            # Precyzyjny zapis do wiersza o konkretnym ID
                             df.at[selected_index, 'Foto1'] = file_url
                             conn.update(spreadsheet=URL, data=df)
                             
-                            st.success("Plik został pomyślnie przypisany do transportu!")
+                            st.success(f"Plik przypisany do wiersza ID {selected_index}!")
                             st.rerun()
                         except Exception as ex:
-                            st.error(f"Wystąpił błąd podczas wysyłki: {ex}")
+                            st.error(f"Błąd: {ex}")
                 else:
-                    st.warning("Najpierw wskaż plik do przesłania.")
+                    st.warning("Najpierw wskaż plik.")
     else:
-        st.info("Brak transportów w widoku. Zmień filtry, aby dodać plik.")
+        st.info("Brak transportów w widoku.")
 
 except Exception as e:
-    st.error(f"Krytyczny błąd aplikacji: {e}")
+    st.error(f"Krytyczny błąd: {e}")
