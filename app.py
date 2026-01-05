@@ -15,6 +15,7 @@ FOLDER_ID = "1HSyhgaJMcpPtFfcHRqdznDfJKT0tBqno"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def get_drive_service():
+    # Wykorzystuje dane uwierzytelniające z Secrets
     info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(info)
     return build('drive', 'v3', credentials=creds)
@@ -41,10 +42,13 @@ try:
     # 1. Pobieramy dane
     df = conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
 
-    # 2. NAPRAWA BŁĘDU: Wymuszamy, aby kolumna NOTATKA była traktowana jako tekst
-    # To usunie błąd "compatible for editing the underlying data type ColumnDataKind.FLOAT"
-    if 'NOTATKA' in df.columns:
-        df['NOTATKA'] = df['NOTATKA'].astype(str).replace('nan', '')
+    # 2. NAPRAWA I DOPASOWANIE KOLUMN
+    # Jeśli kolumna NOTATKA nie istnieje w Sheets, tworzymy ją tymczasowo, żeby edytor nie zgłosił błędu
+    if 'NOTATKA' not in df.columns:
+        df['NOTATKA'] = ""
+    
+    # Wymuszamy typ tekstowy, aby uniknąć błędów FLOAT przy edycji
+    df['NOTATKA'] = df['NOTATKA'].astype(str).replace('nan', '')
 
     st.title("🚀 SQM Logistics Operations")
     st.info("💡 Kliknij dwukrotnie w komórkę, aby edytować. Użyj '+' na dole tabeli, aby dodać nowy wiersz.")
@@ -68,7 +72,13 @@ try:
                 options=["status-planned", "w trasie", "pod rampą", "ROZŁADOWANY", "ZAŁADOWANY-POWRÓT"],
             ),
             "Foto1": st.column_config.LinkColumn("🔗 Dokumentacja", disabled=True),
-            "NOTATKA": st.column_config.TextColumn("📝 Uwagi logistyczne", width="large"),
+            
+            # ZMIANA NAZWY NA: notatka dodatkowa
+            "NOTATKA": st.column_config.TextColumn(
+                "📝 notatka dodatkowa", 
+                width="large"
+            ),
+            
             "Hala": st.column_config.TextColumn("Hala", width="small")
         }
     )
