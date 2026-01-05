@@ -9,13 +9,11 @@ import io
 # --- KONFIGURACJA STRONY ---
 st.set_page_config(page_title="SQM LOGISTICS PRO", layout="wide", initial_sidebar_state="collapsed")
 
-# Dane stałe
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
 FOLDER_ID = "1HSyhgaJMcpPtFfcHRqdznDfJKT0tBqno"
 
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- FUNKCJE GOOGLE DRIVE ---
 def get_drive_service():
     info = st.secrets["connections"]["gsheets"]
     creds = service_account.Credentials.from_service_account_info(info)
@@ -25,25 +23,28 @@ def upload_to_drive(file, folder_id):
     service = get_drive_service()
     file_metadata = {'name': file.name, 'parents': [folder_id]}
     media = MediaIoBaseUpload(io.BytesIO(file.read()), mimetype=file.type, resumable=False)
-    
     uploaded_file = service.files().create(
         body=file_metadata, 
         media_body=media, 
         fields='id, webViewLink',
         supportsAllDrives=True 
     ).execute()
-    
     service.permissions().create(
         fileId=uploaded_file.get('id'), 
         body={'type': 'anyone', 'role': 'viewer'},
         supportsAllDrives=True
     ).execute()
-    
     return uploaded_file.get('webViewLink')
 
 # --- LOGIKA APLIKACJI ---
 try:
+    # 1. Pobieramy dane
     df = conn.read(spreadsheet=URL, ttl=0).dropna(how="all")
+
+    # 2. NAPRAWA BŁĘDU: Wymuszamy, aby kolumna NOTATKA była traktowana jako tekst
+    # To usunie błąd "compatible for editing the underlying data type ColumnDataKind.FLOAT"
+    if 'NOTATKA' in df.columns:
+        df['NOTATKA'] = df['NOTATKA'].astype(str).replace('nan', '')
 
     st.title("🚀 SQM Logistics Operations")
     st.info("💡 Kliknij dwukrotnie w komórkę, aby edytować. Użyj '+' na dole tabeli, aby dodać nowy wiersz.")
@@ -56,7 +57,6 @@ try:
         display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
     # --- EDYTOR DANYCH ---
-    # Usunięto 'placeholder' z NOTATKA, aby wyeliminować błąd
     updated_df = st.data_editor(
         display_df,
         use_container_width=True,
@@ -68,12 +68,7 @@ try:
                 options=["status-planned", "w trasie", "pod rampą", "ROZŁADOWANY", "ZAŁADOWANY-POWRÓT"],
             ),
             "Foto1": st.column_config.LinkColumn("🔗 Dokumentacja", disabled=True),
-            
-            "NOTATKA": st.column_config.TextColumn(
-                "📝 Uwagi logistyczne", 
-                width="large"
-            ),
-            
+            "NOTATKA": st.column_config.TextColumn("📝 Uwagi logistyczne", width="large"),
             "Hala": st.column_config.TextColumn("Hala", width="small")
         }
     )
