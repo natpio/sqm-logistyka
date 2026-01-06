@@ -9,7 +9,7 @@ def check_password():
     """Zwraca True, jeśli użytkownik podał poprawne hasło."""
     def password_entered():
         # HASŁO: SQM2026 (możesz je zmienić poniżej)
-        if st.session_state["password"] == "SQM2026":
+        if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
