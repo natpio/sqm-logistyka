@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. KONFIGURACJA I LOGOWANIE
+# 1. LOGOWANIE I PAMIĘĆ
 controller = CookieController()
 
 def check_password():
@@ -20,7 +20,7 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
-        st.title("🔒 SQM Logistics - Control Tower")
+        st.title("🔒 SQM Logistics - Logowanie")
         st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         return False
     return True
@@ -28,22 +28,28 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Stylizacja i wymuszenie paska przewijania
+    # CSS - WYMUSZENIE ZAWIJANIA TEKSTU I STYLIZACJA
     st.markdown("""
         <style>
+        /* Wymuszenie zawijania tekstu w komórkach tabeli */
+        div[data-testid="stDataFrame"] td div {
+            white-space: normal !important;
+            word-wrap: break-word !important;
+            line-height: 1.4 !important;
+        }
+        /* Wysokość wiersza dostosowana do zawijania */
+        div[data-testid="stDataFrame"] tr {
+            height: auto !important;
+        }
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
-        /* Stylizacja paska przewijania */
-        ::-webkit-scrollbar { height: 12px; }
-        ::-webkit-scrollbar-thumb { background: #1f77b4; border-radius: 10px; }
-        ::-webkit-scrollbar-track { background: #f1f1f1; }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMN (Szeroka notatka wymusza pasek przewijania)
+    # KONFIGURACJA KOLUMN
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "Data": st.column_config.TextColumn("Data", width="small"),
@@ -51,7 +57,7 @@ if check_password():
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz", width="small"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz", width="small"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz", width="small"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width=800)
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
     }
 
     try:
@@ -65,8 +71,9 @@ if check_password():
 
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
-        # METRYKI NA GÓRZE
         st.title("🏗️ SQM Logistics Control Tower")
+        
+        # METRYKI
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
@@ -99,7 +106,7 @@ if check_password():
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-            updated_in = st.data_editor(df_in, use_container_width=False, key="ed_in", column_config=column_cfg)
+            updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
 
         # --- DEMONTAŻE ---
         with tab_out:
@@ -108,7 +115,7 @@ if check_password():
             df_out = df[mask_out].copy()
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-            updated_out = st.data_editor(df_out, use_container_width=False, key="ed_out", column_config=column_cfg)
+            updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
 
         # --- BAZA ---
         with tab_full:
@@ -116,7 +123,7 @@ if check_password():
             df_f = df.copy()
             if search_f:
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            updated_full = st.data_editor(df_f, use_container_width=False, key="ed_f", column_config=column_cfg)
+            updated_full = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
 
         # --- ZAPIS ---
         st.divider()
@@ -132,7 +139,7 @@ if check_password():
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zsynchronizowano!")
+            st.success("Zapisano!")
             st.rerun()
 
     except Exception as e:
