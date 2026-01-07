@@ -7,7 +7,8 @@ import pandas as pd
 # ==========================================
 def check_password():
     def password_entered():
-        if st.session_state["password"] == "SQM2026":
+        # NOWE HASŁO ZGODNIE Z PROŚBĄ: Czaman2026
+        if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
             del st.session_state["password"]
         else:
@@ -74,7 +75,6 @@ if check_password():
             with col_search:
                 search = st.text_input("🔍 Filtruj widok:", key="search_active")
             
-            # --- NOWY PRZYCISK SORTOWANIA ---
             with col_sort:
                 st.write("##")
                 sort_clicked = st.button("📅 SORTUJ WG CZASU", use_container_width=True)
@@ -88,9 +88,7 @@ if check_password():
             active_mask = ~df['STATUS'].str.contains("ROZŁADOWANY", na=False)
             display_df = df[active_mask].copy()
 
-            # Logika sortowania
             if sort_clicked:
-                # Konwersja tymczasowa na format daty, aby sortowanie było poprawne (nie alfabetyczne)
                 display_df['temp_date'] = pd.to_datetime(display_df['Data'], dayfirst=True, errors='coerce')
                 display_df = display_df.sort_values(by=['temp_date', 'Godzina'], ascending=[True, True]).drop(columns=['temp_date'])
 
@@ -122,7 +120,6 @@ if check_password():
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             try:
-                # Ważne: Jeśli dane były sortowane, musimy je scalić z oryginalnym DF po indeksach
                 if not updated_active.equals(display_df):
                     df.update(updated_active)
                     conn.update(spreadsheet=URL, data=df)
