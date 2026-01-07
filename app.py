@@ -33,26 +33,28 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Przywrócenie czystego wyglądu
+    # CSS - Przywrócenie czystego wyglądu i dodanie zawijania tekstu w nagłówkach
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        /* Dodatkowe miejsce dla tabeli na iPadzie */
+        .main .block-container { padding-top: 2rem; padding-bottom: 2rem; }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMM - NAPRAWA LINKÓW POD iPada
-    # Używamy LinkColumn z display_text, co ułatwia Safari interpretację odnośnika
+    # KONFIGURACJA KOLUMN - ZWIĘKSZONA SZEROKOŚĆ NOTATEK
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
-        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
-        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
-        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
-        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
+        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz", width="small"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz", width="small"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz", width="small"),
+        # Ustawiamy width="large", aby notatka była czytelna bez przewijania
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large", help="Kliknij dwukrotnie, aby edytować długi tekst")
     }
 
     try:
@@ -79,7 +81,7 @@ if check_password():
                 all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c2:
                 st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in", placeholder="Wpisz nr projektu, auto lub halę...")
             with c3:
                 st.write("###")
                 if st.button("🔄 Odśwież", key="ref_in"):
@@ -100,7 +102,7 @@ if check_password():
 
         # --- DEMONTAŻE ---
         with tab_out:
-            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out", placeholder="Szukaj po nazwie projektu lub aucie...")
             mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_out = df[mask_out].copy()
             
@@ -121,6 +123,7 @@ if check_password():
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
+            # Zbieranie zmian ze wszystkich edytorów
             for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
                 if key in st.session_state:
                     edytowane = st.session_state[key].get("edited_rows", {})
@@ -131,7 +134,7 @@ if check_password():
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zapisano!")
+            st.success("Dane zapisane pomyślnie!")
             st.rerun()
 
     except Exception as e:
