@@ -4,29 +4,20 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# Inicjalizacja kontrolera ciasteczek
 controller = CookieController()
 
-# ==========================================
-# 1. LOGOWANIE Z PAMIĘCIĄ
-# ==========================================
 def check_password():
-    # Pobierz zapisane hasło z przeglądarki
     saved_auth = controller.get("sqm_login_key")
-    
     if saved_auth == "Czaman2026":
         st.session_state["password_correct"] = True
         return True
-
     def password_entered():
         if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
-            # Zapisz hasło w przeglądarce na 30 dni
             controller.set("sqm_login_key", "Czaman2026", max_age=3600*24*30)
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
-
     if "password_correct" not in st.session_state:
         st.title("🔒 SQM Logistics - Logowanie")
         st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
@@ -40,9 +31,6 @@ def check_password():
         return True
 
 if check_password():
-    # ==========================================
-    # 2. KONFIGURACJA UI
-    # ==========================================
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
     st.markdown("""
@@ -55,7 +43,6 @@ if check_password():
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Konfiguracja kolumn
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
@@ -65,9 +52,6 @@ if check_password():
         "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
     }
 
-    # ==========================================
-    # 3. POBIERANIE DANYCH
-    # ==========================================
     try:
         df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
@@ -75,9 +59,6 @@ if check_password():
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
-        # ==========================================
-        # 4. DASHBOARD & TABS
-        # ==========================================
         st.title("🏗️ SQM Logistics Control Tower")
         
         tab_in, tab_out, tab_priority, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "🚨 RAMPA", "📚 BAZA"])
@@ -99,10 +80,10 @@ if check_password():
                     st.cache_data.clear()
                     st.rerun()
 
+            # POPRAWIONY FILTR: Wyklucza tylko statusy końcowe/rozładowane
             mask_in = ~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_in = df[mask_in].copy()
 
-            # POPRAWKA DATY (KALENDARZ)
             if not all_days_in:
                 df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
                 df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
@@ -118,6 +99,7 @@ if check_password():
         with tab_out:
             st.subheader("Demontaże (Load-out)")
             search_out = st.text_input("🔍 Szukaj wywozu:", key="search_out")
+            # POPRAWIONY FILTR: Pokazuje tylko to, co faktycznie jest rozładowane/wywożone
             mask_out = df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_out = df[mask_out].copy()
             if search_out:
@@ -132,19 +114,17 @@ if check_password():
         with tab_full:
             updated_f = st.data_editor(df, use_container_width=True, key="ed_f", column_config=column_cfg)
 
-        # ==========================================
-        # 5. ZAPIS
-        # ==========================================
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             try:
+                # Synchronizacja zmian z każdego widoku
                 if not updated_in.equals(df_in): df.update(updated_in)
                 if not updated_out.equals(df_out): df.update(updated_out)
                 if not updated_f.equals(df): df.update(updated_f)
                 
                 conn.update(spreadsheet=URL, data=df)
                 st.cache_data.clear()
-                st.success("Zapisano!")
+                st.success("Zapisano! Dane wróciły na właściwe miejsca.")
                 st.rerun()
             except Exception as e:
                 st.error(f"Błąd zapisu: {e}")
@@ -153,6 +133,6 @@ if check_password():
         st.error(f"Błąd krytyczny: {e}")
 
     if st.sidebar.button("Wyloguj"):
-        controller.remove("sqm_login_key") # Czyści pamięć przeglądarki
+        controller.remove("sqm_login_key")
         del st.session_state["password_correct"]
         st.rerun()
