@@ -28,21 +28,12 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - WYMUSZENIE ZAWIJANIA TEKSTU I STYLIZACJA
+    # CSS - Stylizacja
     st.markdown("""
         <style>
-        /* Wymuszenie zawijania tekstu w komórkach tabeli */
-        div[data-testid="stDataFrame"] td div {
-            white-space: normal !important;
-            word-wrap: break-word !important;
-            line-height: 1.4 !important;
-        }
-        /* Wysokość wiersza dostosowana do zawijania */
-        div[data-testid="stDataFrame"] tr {
-            height: auto !important;
-        }
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        .detail-box { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #1f77b4; margin-top: 10px; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -52,12 +43,11 @@ if check_password():
     # KONFIGURACJA KOLUMN
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
-        "Data": st.column_config.TextColumn("Data", width="small"),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
-        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz", width="small"),
-        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz", width="small"),
-        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz", width="small"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA (skrót)", width="medium")
     }
 
     try:
@@ -73,13 +63,25 @@ if check_password():
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # METRYKI
+        # Metryki
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
+
+        # Funkcja pomocnicza do wyświetlania pełnej notatki
+        def show_details(selection, source_df):
+            if selection.selection.rows:
+                selected_idx = selection.selection.rows[0]
+                row_data = source_df.iloc[selected_idx]
+                st.markdown(f"""
+                <div class="detail-box">
+                    <h4>🔍 Pełna treść notatki dla: {row_data['Nazwa Projektu']}</h4>
+                    <p style="font-size: 18px;">{row_data['NOTATKA']}</p>
+                </div>
+                """, unsafe_allow_html=True)
 
         # --- MONTAŻE ---
         with tab_in:
@@ -89,7 +91,7 @@ if check_password():
                 all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c2:
                 st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in", placeholder="Auto, Projekt, Hala...")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
             with c3:
                 st.write("###")
                 if st.button("🔄 Odśwież", key="ref_in"):
@@ -98,15 +100,15 @@ if check_password():
 
             mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_in = df[mask_in].copy()
-
             if not all_days:
                 df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
                 df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
-            
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-            updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            # Używamy on_select="rerun" aby pokazać notatkę po kliknięciu
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
+            show_details(ed_in, df_in)
 
         # --- DEMONTAŻE ---
         with tab_out:
@@ -115,7 +117,9 @@ if check_password():
             df_out = df[mask_out].copy()
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-            updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
+            show_details(ed_out, df_out)
 
         # --- BAZA ---
         with tab_full:
@@ -123,7 +127,8 @@ if check_password():
             df_f = df.copy()
             if search_f:
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            updated_full = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
+            show_details(ed_f, df_f)
 
         # --- ZAPIS ---
         st.divider()
