@@ -20,7 +20,7 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
-        st.title("🔒 SQM Logistics - Logowanie")
+        st.title("🔒 SQM Logistics - Control Tower")
         st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         return False
     return True
@@ -28,12 +28,20 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Stylizacja
+    # CSS - Stylizacja pod iPada
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
-        .detail-box { background-color: #f0f2f6; padding: 20px; border-radius: 10px; border-left: 5px solid #1f77b4; margin-top: 10px; }
+        .notatka-box { 
+            background-color: #fff3cd; 
+            padding: 20px; 
+            border-radius: 10px; 
+            border-left: 10px solid #ffc107; 
+            margin: 20px 0;
+            font-size: 20px !important;
+            color: #856404;
+        }
         </style>
         """, unsafe_allow_html=True)
 
@@ -43,17 +51,22 @@ if check_password():
     # KONFIGURACJA KOLUMN
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
+        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA (skrót)", width="medium")
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
     }
 
     try:
         raw_df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
+        # Dodajemy kolumnę techniczną do podglądu
+        if "PODGLĄD" not in df.columns:
+            df.insert(0, "PODGLĄD", False)
+
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
@@ -63,7 +76,7 @@ if check_password():
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # Metryki
+        # METRYKI
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
@@ -71,15 +84,15 @@ if check_password():
 
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # Funkcja pomocnicza do wyświetlania pełnej notatki
-        def show_details(selection, source_df):
-            if selection.selection.rows:
-                selected_idx = selection.selection.rows[0]
-                row_data = source_df.iloc[selected_idx]
+        # Funkcja podglądu notatki bez on_select
+        def render_notatka_viewer(edited_df):
+            selected = edited_df[edited_df["PODGLĄD"] == True]
+            if not selected.empty:
+                row = selected.iloc[0]
                 st.markdown(f"""
-                <div class="detail-box">
-                    <h4>🔍 Pełna treść notatki dla: {row_data['Nazwa Projektu']}</h4>
-                    <p style="font-size: 18px;">{row_data['NOTATKA']}</p>
+                <div class="notatka-box">
+                    <strong>PEŁNA NOTATKA ({row['Nazwa Projektu']}):</strong><br>
+                    {row['NOTATKA']}
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -106,9 +119,8 @@ if check_password():
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-            # Używamy on_select="rerun" aby pokazać notatkę po kliknięciu
-            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
-            show_details(ed_in, df_in)
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            render_notatka_viewer(ed_in)
 
         # --- DEMONTAŻE ---
         with tab_out:
@@ -118,8 +130,8 @@ if check_password():
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
             
-            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
-            show_details(ed_out, df_out)
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            render_notatka_viewer(ed_out)
 
         # --- BAZA ---
         with tab_full:
@@ -127,8 +139,8 @@ if check_password():
             df_f = df.copy()
             if search_f:
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg, on_select="rerun", selection_mode="single-row")
-            show_details(ed_f, df_f)
+            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            render_notatka_viewer(ed_f)
 
         # --- ZAPIS ---
         st.divider()
@@ -141,6 +153,10 @@ if check_password():
                         real_idx = source_df.index[int(row_idx_str)]
                         for col, val in changes.items():
                             final_df.at[real_idx, col] = val
+            
+            # Usuwamy kolumnę techniczną przed zapisem do GSheets
+            if "PODGLĄD" in final_df.columns:
+                final_df = final_df.drop(columns=["PODGLĄD"])
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
