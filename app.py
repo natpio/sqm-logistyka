@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. KONFIGURACJA I LOGOWANIE
+# 1. LOGOWANIE I PAMIĘĆ (COOKIES)
 controller = CookieController()
 
 def check_password():
@@ -20,47 +20,46 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
-        st.title("🔒 SQM Logistics Control Tower")
-        st.text_input("Hasło dostępowe:", type="password", on_change=password_entered, key="password")
+        st.title("🔒 SQM Logistics - Logowanie")
+        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
+        return False
+    elif not st.session_state["password_correct"]:
+        st.title("🔒 SQM Logistics - Logowanie")
+        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
+        st.error("❌ Hasło niepoprawne.")
         return False
     return True
 
 if check_password():
-    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide")
+    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # Stylizacja pod tablet i czytelność
+    # CSS - Przywrócenie czystego wyglądu
     st.markdown("""
         <style>
-        .stButton button { width: 100%; height: 55px; font-size: 18px !important; font-weight: bold; }
-        [data-testid="stDataFrame"] td { padding: 12px !important; }
+        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
-        div[data-testid="stMetric"] { background-color: #f8f9fb; border-radius: 10px; padding: 10px; border: 1px solid #e0e0e0; }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Konfiguracja kolumn
+    # KONFIGURACJA KOLUMM - NAPRAWA LINKÓW POD iPada
+    # Używamy LinkColumn z display_text, co ułatwia Safari interpretację odnośnika
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
-        "WYBIERZ": st.column_config.CheckboxColumn("📂", default=False),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
-        "spis casów": st.column_config.TextColumn("📋 Link Spis"),
-        "zdjęcie po załadunku": st.column_config.TextColumn("📸 Link Foto"),
-        "SLOT": st.column_config.TextColumn("⏰ Link SLOT"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
     }
 
     try:
-        # POBIERANIE I PRZYGOTOWANIE DANYCH
+        # POBIERANIE DANYCH
         raw_df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
-        # Dodajemy kolumnę WYBIERZ jeśli nie istnieje (techniczna dla iPada)
-        if "WYBIERZ" not in df.columns:
-            df.insert(0, "WYBIERZ", False)
-
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
@@ -68,46 +67,25 @@ if check_password():
 
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
-        # DASHBOARD METRYKI
-        m1, m2, m3 = st.columns(3)
-        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
-        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
-        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
+        st.title("🏗️ SQM Logistics Control Tower")
+        
+        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # PRZYCISKI GŁÓWNE
-        c_save, c_ref = st.columns(2)
-        with c_save: btn_save = st.button("💾 ZAPISZ WSZYSTKIE ZMIANY")
-        with c_ref: 
-            if st.button("🔄 ODŚWIEŻ DANE"):
-                st.cache_data.clear()
-                st.rerun()
-
-        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 PEŁNA BAZA"])
-
-        # Funkcja do wyświetlania przycisków linków pod tabelą
-        def show_ipad_links(edited_df):
-            # Sprawdza czy w session_state są jakiekolwiek zmiany w checkboxach
-            selected = edited_df[edited_df["WYBIERZ"] == True]
-            if not selected.empty:
-                row = selected.iloc[0]
-                st.info(f"Dokumentacja dla: **{row['Nazwa Projektu']}**")
-                l1, l2, l3 = st.columns(3)
-                with l1:
-                    if "http" in str(row['spis casów']): st.link_button("📋 SPIS CASE'ÓW", row['spis casów'])
-                with l2:
-                    if "http" in str(row['zdjęcie po załadunku']): st.link_button("📸 FOTO", row['zdjęcie po załadunku'])
-                with l3:
-                    if "http" in str(row['SLOT']): st.link_button("⏰ SLOT / AWIZACJA", row['SLOT'])
-
-        # --- ZAKŁADKA 1: MONTAŻE ---
+        # --- MONTAŻE ---
         with tab_in:
-            c1, c2 = st.columns([1, 2])
+            c1, c2, c3 = st.columns([1.5, 2, 1])
             with c1:
                 selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
-                all_days = st.checkbox("Pokaż wszystkie dni", value=False, key="a_in")
+                all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c2:
-                search_in = st.text_input("🔍 Szukaj w montażach (auto, nr projektu, hala):", key="s_in")
-            
+                st.write("##")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
+            with c3:
+                st.write("###")
+                if st.button("🔄 Odśwież", key="ref_in"):
+                    st.cache_data.clear()
+                    st.rerun()
+
             mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_in = df[mask_in].copy()
 
@@ -117,35 +95,33 @@ if check_password():
             
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
-            
-            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
-            show_ipad_links(ed_in)
 
-        # --- ZAKŁADKA 2: DEMONTAŻE ---
+            updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+
+        # --- DEMONTAŻE ---
         with tab_out:
-            search_out = st.text_input("🔍 Szukaj w demontażach:", key="s_out")
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
             mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_out = df[mask_out].copy()
             
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
                 
-            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
-            show_ipad_links(ed_out)
+            updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
 
-        # --- ZAKŁADKA 3: BAZA ---
+        # --- BAZA ---
         with tab_full:
             search_f = st.text_input("🔍 Szukaj w całej bazie:", key="s_f")
             df_f = df.copy()
             if search_f:
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            ed_full = st.data_editor(df_f, use_container_width=True, key="ed_full", column_config=column_cfg)
+            updated_full = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
 
-        # --- LOGIKA ZAPISU (Pancerne łączenie zmian) ---
-        if btn_save:
+        # --- ZAPIS ---
+        st.divider()
+        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
-            # Iterujemy przez wszystkie edytory i nakładamy zmiany na bazę główną
-            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_full", df_f)]:
+            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
                 if key in st.session_state:
                     edytowane = st.session_state[key].get("edited_rows", {})
                     for row_idx_str, changes in edytowane.items():
@@ -153,21 +129,14 @@ if check_password():
                         for col, val in changes.items():
                             final_df.at[real_idx, col] = val
             
-            # Czyścimy kolumnę techniczną WYBIERZ przed wysłaniem do GSheets
-            if "WYBIERZ" in final_df.columns:
-                final_df = final_df.drop(columns=["WYBIERZ"])
-            
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("✅ ZMIANY ZAPISANE POMYŚLNIE!")
+            st.success("Zapisano!")
             st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd krytyczny: {e}")
+        st.error(f"Błąd: {e}")
 
-    # Sidebar z wylogowaniem i informacją o firmie
-    st.sidebar.title("SQM Logistics")
-    st.sidebar.info("Pracujesz w SQM Multimedia Solutions. System Control Tower.")
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
         st.rerun()
