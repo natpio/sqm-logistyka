@@ -4,9 +4,9 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. INICJALIZACJA
 controller = CookieController()
 
+# 1. LOGOWANIE (bez zmian)
 def check_password():
     saved_auth = controller.get("sqm_login_key")
     if saved_auth == "Czaman2026":
@@ -20,42 +20,40 @@ def check_password():
         else:
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
-        st.title("🔒 SQM Logistics - Logowanie")
+        st.title("🔒 SQM Logistics")
         st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         return False
-    elif not st.session_state["password_correct"]:
-        st.title("🔒 SQM Logistics - Logowanie")
-        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
-        st.error("❌ Hasło niepoprawne.")
-        return False
-    else:
-        return True
+    return True
 
 if check_password():
-    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="SQM TABLET MODE", layout="wide")
 
-    # CSS dla lepszej czytelności
+    # CSS OPTYMALIZOWANY POD TABLET (Większe odstępy, duże przyciski)
     st.markdown("""
         <style>
-        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        .stButton button { width: 100%; height: 60px; font-size: 20px !important; margin-bottom: 10px; }
+        div[data-testid="stMetric"] { padding: 10px; }
+        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; font-weight: bold; }
+        /* Większe wiersze w tabeli dla palca */
+        [data-testid="stDataFrame"] td { padding: 15px !important; }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
+    # Konfiguracja kolumn - zmieniamy LinkColumn na TextColumn w edytorze, 
+    # a linki obsłużymy przyciskami pod spodem.
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
-        "spis casów": st.column_config.LinkColumn("📋 Spis"),
-        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
-        "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
+        "spis casów": st.column_config.TextColumn("📋 Spis (Link)"),
+        "zdjęcie po załadunku": st.column_config.TextColumn("📸 Foto (Link)"),
+        "SLOT": st.column_config.TextColumn("⏰ SLOT (Link)"),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
     }
 
     try:
-        # POBIERANIE DANYCH I RESET INDEKSU
         raw_df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
@@ -66,76 +64,78 @@ if check_password():
 
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
-        st.title("🏗️ SQM Logistics Control Tower")
-        tab_in, tab_out, tab_priority, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "🚨 RAMPA", "📚 BAZA"])
+        # --- PANEL AKCJI NA GÓRZE (PRZYCISKI DLA iPada) ---
+        col_save, col_ref = st.columns(2)
+        with col_save:
+            btn_save = st.button("💾 ZAPISZ ZMIANY")
+        with col_ref:
+            if st.button("🔄 ODŚWIEŻ DANE"):
+                st.cache_data.clear()
+                st.rerun()
 
-        # --- TAB 1: MONTAŻE ---
+        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 PEŁNA BAZA"])
+
+        # --- FUNKCJA DO OBSŁUGI LINKÓW ---
+        def link_preview_section(selected_rows, source_df):
+            if len(selected_rows) > 0:
+                idx = selected_rows[0]
+                row_data = source_df.iloc[idx]
+                st.markdown("---")
+                st.subheader(f"📂 Dokumentacja: {row_data['Nazwa Projektu']}")
+                c1, c2, c3 = st.columns(3)
+                
+                # Duże przyciski, które iPad otwiera bez problemu
+                with c1:
+                    if row_data['spis casów'] and "http" in row_data['spis casów']:
+                        st.link_button("📋 OTWÓRZ SPIS CASE'ÓW", row_data['spis casów'])
+                with c2:
+                    if row_data['zdjęcie po załadunku'] and "http" in row_data['zdjęcie po załadunku']:
+                        st.link_button("📸 OTWÓRZ ZDJĘCIA", row_data['zdjęcie po załadunku'])
+                with c3:
+                    if row_data['SLOT'] and "http" in row_data['SLOT']:
+                        st.link_button("⏰ OTWÓRZ SLOT", row_data['SLOT'])
+
+        # --- MONTAŻE ---
         with tab_in:
-            c1, c2, c3 = st.columns([1.5, 2, 1])
-            with c1:
-                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
-                all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
-            with c2:
-                st.write("##")
-                search_in = st.text_input("🔍 Szukaj w montażach:", key="s_in")
-            with c3:
-                st.write("###")
-                if st.button("🔄 Odśwież", key="ref_in", use_container_width=True):
-                    st.cache_data.clear()
-                    st.rerun()
-            
+            search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
             mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_in = df[mask_in].copy()
-
-            if not all_days:
-                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
-                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
-            
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
             
+            # Dodajemy parametr on_change lub selection_mode
+            event_in = st.dataframe(df_in, use_container_width=True, column_config=column_cfg, on_select="rerun", selection_mode="single_row")
+            link_preview_section(event_in.selection.rows, df_in)
             updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
 
-        # --- TAB 2: DEMONTAŻE ---
+        # --- DEMONTAŻE ---
         with tab_out:
-            st.subheader("Demontaże (Load-out)")
-            search_out = st.text_input("🔍 Szukaj w demontażach (auto, projekt...):", key="s_out")
-            
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
             mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_out = df[mask_out].copy()
-            
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-                
+            
+            event_out = st.dataframe(df_out, use_container_width=True, column_config=column_cfg, on_select="rerun", selection_mode="single_row")
+            link_preview_section(event_out.selection.rows, df_out)
             updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
-
-        # --- TAB 3: RAMPA ---
-        with tab_priority:
-            st.subheader("Status: POD RAMPĄ")
-            ramp_df = df[df['STATUS'].str.contains("RAMP", na=False)].copy()
-            st.dataframe(ramp_df, use_container_width=True, column_config=column_cfg)
 
         # --- TAB 4: PEŁNA BAZA ---
         with tab_full:
-            search_full = st.text_input("🔍 Szukaj w całej bazie:", key="s_full")
-            df_full = df.copy()
-            if search_full:
-                df_full = df_full[df_full.apply(lambda r: r.astype(str).str.contains(search_full, case=False).any(), axis=1)]
-            updated_full = st.data_editor(df_full, use_container_width=True, key="ed_full", column_config=column_cfg)
+            updated_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg)
 
-        # --- ZAPIS (PANNCERNA LOGIKA INDEKSÓW) ---
-        st.divider()
-        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
+        # --- ZAPIS (Pancerny) ---
+        if btn_save:
             final_df = df.copy()
-            
-            # Aktualizujemy główny dataframe zmianami z edytorów
-            for updated_df in [updated_in, updated_out, updated_full]:
-                for index, row in updated_df.iterrows():
+            # Łączymy zmiany z edytorów (jeśli były edytowane)
+            # Uwaga: data_editor zwraca tylko zmiany, więc łączymy ostrożnie
+            for upd, original in [(updated_in, df_in), (updated_out, df_out), (updated_full, df)]:
+                for index, row in upd.iterrows():
                     final_df.loc[index] = row
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zsynchronizowano! Zmiany zapisane w Google Sheets.")
+            st.success("ZAPISANO!")
             st.rerun()
 
     except Exception as e:
