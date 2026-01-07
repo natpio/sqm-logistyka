@@ -17,17 +17,15 @@ def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔒 SQM Logistics - Dostęp autoryzowany")
         st.text_input("Podaj hasło dostępowe:", type="password", on_change=password_entered, key="password")
-        st.info("System wymaga autoryzacji do wglądu w harmonogram transportów.")
         return False
     elif not st.session_state["password_correct"]:
         st.title("🔒 SQM Logistics - Dostęp autoryzowany")
         st.text_input("Podaj hasło dostępowe:", type="password", on_change=password_entered, key="password")
-        st.error("❌ Hasło niepoprawne. Spróbuj ponownie.")
+        st.error("❌ Hasło niepoprawne.")
         return False
     else:
         return True
 
-# --- URUCHOMIENIE APLIKACJI TYLKO PO LOGOWANIU ---
 if check_password():
 
     # ==========================================
@@ -47,7 +45,7 @@ if check_password():
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Wspólna konfiguracja kolumn (dla wszystkich widoków)
+    # Konfiguracja kolumn
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
@@ -55,9 +53,7 @@ if check_password():
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
         "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Dodatkowe", display_text="Otwórz"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large"),
-        "Data": st.column_config.TextColumn("Data", width="small"),
-        "Godzina": st.column_config.TextColumn("Godzina", width="small")
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
     }
 
     # ==========================================
@@ -77,104 +73,106 @@ if check_password():
         st.title("🏗️ SQM Logistics Control Tower")
         
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Wszystkie transporty", len(df))
+        m1.metric("Wszystkie", len(df))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m4.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        tab_active, tab_priority, tab_full = st.tabs(["📅 HARMONOGRAM OPERACJI", "🚨 TYLKO POD RAMPĄ", "📚 PEŁNA BAZA (ARCHIWUM)"])
+        tab_active, tab_out, tab_priority, tab_full = st.tabs([
+            "📅 HARMONOGRAM MONTAŻY", 
+            "🔄 DEMONTAŻE / ZAŁADUNKI",
+            "🚨 TYLKO POD RAMPĄ", 
+            "📚 PEŁNA BAZA"
+        ])
 
-        # --- TAB 1: HARMONOGRAM (Filtr Kalendarza + Status Aktywny) ---
+        # --- TAB 1: MONTAŻE ---
         with tab_active:
             col_date, col_search, col_sort, col_ref = st.columns([1.5, 2, 1, 1])
-            
             with col_date:
-                # Domyślnie ustawiamy dzisiejszą datę
-                selected_date = st.date_input("📅 Wybierz dzień rozładunku:", value=datetime.now())
-                all_days = st.checkbox("Pokaż wszystkie dni", value=False)
-            
+                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="date_in")
+                all_days_in = st.checkbox("Wszystkie dni", value=False, key="all_in")
             with col_search:
                 st.write("##")
-                search = st.text_input("🔍 Szukaj w wynikach:", key="search_active")
-            
+                search_in = st.text_input("🔍 Szukaj:", key="search_active")
             with col_sort:
                 st.write("###")
-                sort_clicked = st.button("📅 SORTUJ CZASOWO", use_container_width=True)
-            
+                sort_in = st.button("📅 SORTUJ CZASOWO", key="sort_in", use_container_width=True)
             with col_ref:
                 st.write("###")
-                if st.button("🔄 Odśwież", use_container_width=True):
+                if st.button("🔄 Odśwież", key="ref_in", use_container_width=True):
                     st.cache_data.clear()
                     st.rerun()
 
-            # Filtrujemy tylko to, co NIE jest rozładowane
-            active_mask = ~df['STATUS'].str.contains("ROZŁADOWANY", na=False)
-            display_df = df[active_mask].copy()
+            # Filtr: tylko to co NIE jest jeszcze rozładowane (lub w trakcie)
+            mask_in = ~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
+            df_in = df[mask_in].copy()
 
-            # Filtr kalendarzowy (DD.MM.RRRR)
-            if not all_days:
-                date_str = selected_date.strftime("%d.%m.%Y")
-                display_df = display_df[display_df['Data'] == date_str]
+            if not all_days_in:
+                df_in = df_in[df_in['Data'] == selected_date.strftime("%d.%m.%Y")]
+            if sort_in:
+                df_in['t_date'] = pd.to_datetime(df_in['Data'], dayfirst=True, errors='coerce')
+                df_in = df_in.sort_values(by=['t_date', 'Godzina']).drop(columns=['t_date'])
+            if search_in:
+                df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-            # Logika sortowania chronologicznego
-            if sort_clicked:
-                display_df['temp_date'] = pd.to_datetime(display_df['Data'], dayfirst=True, errors='coerce')
-                display_df = display_df.sort_values(by=['temp_date', 'Godzina'], ascending=[True, True]).drop(columns=['temp_date'])
+            updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
 
-            if search:
-                display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+        # --- TAB 2: DEMONTAŻE (KONCEPCJA 1) ---
+        with tab_out:
+            st.subheader("Zarządzanie załadunkiem i wywozem (Load-out)")
+            col_search_out, col_ref_out = st.columns([4, 1])
+            with col_search_out:
+                search_out = st.text_input("🔍 Szukaj transportu do wywozu:", key="search_out")
+            with col_ref_out:
+                st.write("##")
+                if st.button("🔄 Odśwież", key="ref_out", use_container_width=True):
+                    st.cache_data.clear()
+                    st.rerun()
 
-            if display_df.empty and not all_days:
-                st.warning(f"Brak zaplanowanych operacji na dzień {selected_date.strftime('%d.%m.%Y')}.")
-            
-            updated_active = st.data_editor(display_df, use_container_width=True, key="active_editor", column_config=column_cfg)
+            # Filtr: tylko to co JUŻ zostało rozładowane LUB jest w trakcie demontażu
+            mask_out = df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
+            df_out = df[mask_out].copy()
 
-        # --- TAB 2: POD RAMPĄ (Pełne dane i linki) ---
+            if search_out:
+                df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
+
+            updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+
+        # --- TAB 3: POD RAMPĄ ---
         with tab_priority:
-            st.subheader("Auta aktualnie obsługiwane pod rampą")
+            st.subheader("Auta pod rampą (Montaż/Demontaż)")
             ramp_df = df[df['STATUS'].str.contains("RAMP", na=False)].copy()
-            if not ramp_df.empty:
-                # Wyświetlamy jako dataframe z linkami
-                st.dataframe(ramp_df, use_container_width=True, column_config=column_cfg)
-            else:
-                st.info("Obecnie żadne auto nie ma statusu 'POD RAMPĄ'.")
+            st.dataframe(ramp_df, use_container_width=True, column_config=column_cfg)
 
-        # --- TAB 3: PEŁNA BAZA (Edytowalne archiwum) ---
+        # --- TAB 4: PEŁNA BAZA ---
         with tab_full:
-            st.subheader("Archiwum i Edycja Statusów")
-            st.caption("Tutaj możesz zmienić status 'ROZŁADOWANY' na inny, aby przywrócić wiersz do harmonogramu.")
-            search_full = st.text_input("🔍 Szukaj w całej bazie:", key="search_full")
-            
-            full_display = df.copy()
-            if search_full:
-                full_display = full_display[full_display.apply(lambda r: r.astype(str).str.contains(search_full, case=False).any(), axis=1)]
-                
-            updated_full = st.data_editor(full_display, use_container_width=True, key="full_editor", column_config=column_cfg)
+            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="search_f")
+            df_f = df.copy()
+            if search_f:
+                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
+            updated_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
 
         # ==========================================
-        # 5. LOGIKA ZAPISU (Synchronizacja)
+        # 5. ZAPIS
         # ==========================================
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
-            with st.spinner("Synchronizacja z bazą SQM..."):
-                try:
-                    # Sprawdzamy, który widok był edytowany i aktualizujemy główny DF
-                    if not updated_active.equals(display_df):
-                        df.update(updated_active)
-                    elif not updated_full.equals(full_display):
-                        df.update(updated_full)
-                    
-                    conn.update(spreadsheet=URL, data=df)
-                    st.cache_data.clear()
-                    st.success("Zapisano pomyślnie! Dane w arkuszu są aktualne.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Błąd zapisu: {e}")
+            try:
+                # Scalanie zmian ze wszystkich edytorów
+                if not updated_in.equals(df_in): df.update(updated_in)
+                if not updated_out.equals(df_out): df.update(updated_out)
+                if not updated_f.equals(df_f): df.update(updated_f)
+                
+                conn.update(spreadsheet=URL, data=df)
+                st.cache_data.clear()
+                st.success("Dane SQM zsynchronizowane!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Błąd zapisu: {e}")
 
     except Exception as e:
-        st.error(f"Błąd krytyczny połączenia: {e}")
+        st.error(f"Błąd krytyczny: {e}")
 
-    # Sidebar z wylogowaniem
     if st.sidebar.button("Wyloguj"):
         del st.session_state["password_correct"]
         st.rerun()
