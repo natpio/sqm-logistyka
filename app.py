@@ -2,42 +2,52 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 from datetime import datetime
+from streamlit_cookies_controller import CookieController
+
+# Inicjalizacja kontrolera ciasteczek
+controller = CookieController()
 
 # ==========================================
-# 1. LOGOWANIE - HASŁO: Czaman2026
+# 1. LOGOWANIE Z PAMIĘCIĄ
 # ==========================================
 def check_password():
+    # Pobierz zapisane hasło z przeglądarki
+    saved_auth = controller.get("sqm_login_key")
+    
+    if saved_auth == "Czaman2026":
+        st.session_state["password_correct"] = True
+        return True
+
     def password_entered():
         if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
+            # Zapisz hasło w przeglądarce na 30 dni
+            controller.set("sqm_login_key", "Czaman2026", max_age=3600*24*30)
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
 
     if "password_correct" not in st.session_state:
-        st.title("🔒 SQM Logistics - Dostęp autoryzowany")
-        st.text_input("Podaj hasło dostępowe:", type="password", on_change=password_entered, key="password")
+        st.title("🔒 SQM Logistics - Logowanie")
+        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         return False
     elif not st.session_state["password_correct"]:
-        st.title("🔒 SQM Logistics - Dostęp autoryzowany")
-        st.text_input("Podaj hasło dostępowe:", type="password", on_change=password_entered, key="password")
+        st.title("🔒 SQM Logistics - Logowanie")
+        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         st.error("❌ Hasło niepoprawne.")
         return False
     else:
         return True
 
 if check_password():
-
     # ==========================================
-    # 2. KONFIGURACJA UI I CSS
+    # 2. KONFIGURACJA UI
     # ==========================================
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
     st.markdown("""
         <style>
-        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
-        div[data-testid="stMetricValue"] > div { color: #1f77b4; }
-        .stTabs [data-baseweb="tab"] { background-color: #f0f2f6; border-radius: 5px 5px 0 0; padding: 10px 20px; }
+        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
@@ -52,7 +62,6 @@ if check_password():
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
-        "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Dodatkowe", display_text="Otwórz"),
         "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
     }
 
@@ -62,42 +71,29 @@ if check_password():
     try:
         df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
-        
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
         # ==========================================
-        # 4. DASHBOARD
+        # 4. DASHBOARD & TABS
         # ==========================================
         st.title("🏗️ SQM Logistics Control Tower")
         
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Wszystkie", len(df))
-        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
-        m3.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
-        m4.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
+        tab_in, tab_out, tab_priority, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "🚨 RAMPA", "📚 BAZA"])
 
-        tab_active, tab_out, tab_priority, tab_full = st.tabs([
-            "📅 HARMONOGRAM MONTAŻY", 
-            "🔄 DEMONTAŻE / ZAŁADUNKI",
-            "🚨 TYLKO POD RAMPĄ", 
-            "📚 PEŁNA BAZA"
-        ])
-
-        # --- TAB 1: MONTAŻE ---
-        with tab_active:
-            col_date, col_search, col_sort, col_ref = st.columns([1.5, 2, 1, 1])
-            with col_date:
+        with tab_in:
+            c1, c2, c3, c4 = st.columns([1.5, 2, 1, 1])
+            with c1:
                 selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="date_in")
                 all_days_in = st.checkbox("Wszystkie dni", value=False, key="all_in")
-            with col_search:
+            with c2:
                 st.write("##")
                 search_in = st.text_input("🔍 Szukaj:", key="search_active")
-            with col_sort:
+            with c3:
                 st.write("###")
-                sort_in = st.button("📅 SORTUJ CZASOWO", key="sort_in", use_container_width=True)
-            with col_ref:
+                sort_in = st.button("📅 SORTUJ", key="sort_in", use_container_width=True)
+            with c4:
                 st.write("###")
                 if st.button("🔄 Odśwież", key="ref_in", use_container_width=True):
                     st.cache_data.clear()
@@ -106,55 +102,35 @@ if check_password():
             mask_in = ~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_in = df[mask_in].copy()
 
-            # POPRAWKA FILTROWANIA DATY
+            # POPRAWKA DATY (KALENDARZ)
             if not all_days_in:
-                # Bezpieczna konwersja kolumny na format daty
                 df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
-                # Porównanie wybranej daty z kalendarza z datami w tabeli
                 df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
 
             if sort_in:
                 df_in['t_date'] = pd.to_datetime(df_in['Data'], dayfirst=True, errors='coerce')
                 df_in = df_in.sort_values(by=['t_date', 'Godzina']).drop(columns=['t_date'])
-            
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
             updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
 
-        # --- TAB 2: DEMONTAŻE ---
         with tab_out:
-            st.subheader("Zarządzanie załadunkiem i wywozem (Load-out)")
-            col_search_out, col_ref_out = st.columns([4, 1])
-            with col_search_out:
-                search_out = st.text_input("🔍 Szukaj transportu do wywozu:", key="search_out")
-            with col_ref_out:
-                st.write("##")
-                if st.button("🔄 Odśwież", key="ref_out", use_container_width=True):
-                    st.cache_data.clear()
-                    st.rerun()
-
+            st.subheader("Demontaże (Load-out)")
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="search_out")
             mask_out = df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_out = df[mask_out].copy()
-
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-
             updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
 
-        # --- TAB 3: POD RAMPĄ ---
         with tab_priority:
-            st.subheader("Auta pod rampą (Montaż/Demontaż)")
+            st.subheader("Auta pod rampą")
             ramp_df = df[df['STATUS'].str.contains("RAMP", na=False)].copy()
             st.dataframe(ramp_df, use_container_width=True, column_config=column_cfg)
 
-        # --- TAB 4: PEŁNA BAZA ---
         with tab_full:
-            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="search_f")
-            df_f = df.copy()
-            if search_f:
-                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            updated_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            updated_f = st.data_editor(df, use_container_width=True, key="ed_f", column_config=column_cfg)
 
         # ==========================================
         # 5. ZAPIS
@@ -164,11 +140,11 @@ if check_password():
             try:
                 if not updated_in.equals(df_in): df.update(updated_in)
                 if not updated_out.equals(df_out): df.update(updated_out)
-                if not updated_f.equals(df_f): df.update(updated_f)
+                if not updated_f.equals(df): df.update(updated_f)
                 
                 conn.update(spreadsheet=URL, data=df)
                 st.cache_data.clear()
-                st.success("Dane SQM zsynchronizowane!")
+                st.success("Zapisano!")
                 st.rerun()
             except Exception as e:
                 st.error(f"Błąd zapisu: {e}")
@@ -177,5 +153,6 @@ if check_password():
         st.error(f"Błąd krytyczny: {e}")
 
     if st.sidebar.button("Wyloguj"):
+        controller.remove("sqm_login_key") # Czyści pamięć przeglądarki
         del st.session_state["password_correct"]
         st.rerun()
