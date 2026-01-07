@@ -23,41 +23,36 @@ def check_password():
         st.title("🔒 SQM Logistics - Logowanie")
         st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
         return False
-    elif not st.session_state["password_correct"]:
-        st.title("🔒 SQM Logistics - Logowanie")
-        st.text_input("Hasło:", type="password", on_change=password_entered, key="password")
-        st.error("❌ Hasło niepoprawne.")
-        return False
     return True
 
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Stylizacja tabeli i wymuszenie paska przewijania
+    # CSS - Wymuszenie widoczności paska przewijania i usunięcie ograniczeń szerokości
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
-        /* Stylizacja paska przewijania dla iPada */
-        ::-webkit-scrollbar { height: 10px; }
-        ::-webkit-scrollbar-thumb { background: #1f77b4; border-radius: 5px; }
+        
+        /* Ustawienie minimalnej szerokości dla kontenera tabeli */
+        [data-testid="stDataFrame"] {
+            min-width: 1200px !important;
+        }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMN - PASEK PRZEWIJANIA WYMUSZONY SZEROKOŚCIĄ
+    # KONFIGURACJA KOLUMN - NOTATKA NA 800 PIKSELI
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "Data": st.column_config.TextColumn("Data", width="small"),
-        "Nr Slotu": st.column_config.TextColumn("Nr Slotu", width="small"),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz", width="small"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz", width="small"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz", width="small"),
-        # Szerokość 600px wymusi pasek przewijania na większości tabletów
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width=600, help="Kliknij dwukrotnie, by zobaczyć całość")
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width=800) # Bardzo szeroka kolumna
     }
 
     try:
@@ -72,35 +67,18 @@ if check_password():
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
         st.title("🏗️ SQM Logistics Control Tower")
-        
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
         with tab_in:
-            c1, c2, c3 = st.columns([1.5, 2, 1])
-            with c1:
-                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
-                all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
-            with c2:
-                st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
-            with c3:
-                st.write("###")
-                if st.button("🔄 Odśwież", key="ref_in"):
-                    st.cache_data.clear()
-                    st.rerun()
-
+            search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
             mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_in = df[mask_in].copy()
-
-            if not all_days:
-                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
-                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
             
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-            # use_container_width=True w połączeniu ze stałymi szerokościami kolumn aktywuje pasek przewijania
-            updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            # KLUCZOWA ZMIANA: use_container_width=False
+            updated_in = st.data_editor(df_in, use_container_width=False, key="ed_in", column_config=column_cfg)
 
         with tab_out:
             search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
@@ -108,19 +86,16 @@ if check_password():
             df_out = df[mask_out].copy()
             if search_out:
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-            updated_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            
+            updated_out = st.data_editor(df_out, use_container_width=False, key="ed_out", column_config=column_cfg)
 
         with tab_full:
-            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="s_f")
-            df_f = df.copy()
-            if search_f:
-                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            updated_full = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            updated_full = st.data_editor(df, use_container_width=False, key="ed_full", column_config=column_cfg)
 
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
-            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
+            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_full", df)]:
                 if key in st.session_state:
                     edytowane = st.session_state[key].get("edited_rows", {})
                     for row_idx_str, changes in edytowane.items():
@@ -130,12 +105,12 @@ if check_password():
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zapisano! Notatki zostały zaktualizowane.")
+            st.success("Zapisano!")
             st.rerun()
 
     except Exception as e:
         st.error(f"Błąd: {e}")
 
-    if st.sidebar.button("Wyloguj"):
-        controller.remove("sqm_login_key")
-        st.rerun()
+if st.sidebar.button("Wyloguj"):
+    controller.remove("sqm_login_key")
+    st.rerun()
