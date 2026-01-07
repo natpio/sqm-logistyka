@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. KONFIGURACJA WSTĘPNA
+# 1. KONFIGURACJA I LOGOWANIE
 controller = CookieController()
 
 def check_password():
@@ -28,22 +28,22 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide")
 
-    # CSS pod iPada - większe elementy dotykowe
+    # Stylizacja pod tablet
     st.markdown("""
         <style>
         .stButton button { width: 100%; height: 55px; font-size: 18px !important; font-weight: bold; }
-        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
         [data-testid="stDataFrame"] td { padding: 12px !important; }
-        div[data-testid="stMetric"] { background-color: #f8f9fb; border-radius: 10px; padding: 10px; border: 1px solid #e0e0e0; }
+        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
 
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Definicja kolumn
+    # Konfiguracja kolumn - dodajemy kolumnę "WYBIERZ" jako checkbox
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
+        "WYBIERZ": st.column_config.CheckboxColumn("📂", default=False),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options),
         "spis casów": st.column_config.TextColumn("📋 Link Spis"),
         "zdjęcie po załadunku": st.column_config.TextColumn("📸 Link Foto"),
@@ -52,23 +52,19 @@ if check_password():
     }
 
     try:
-        # POBIERANIE DANYCH
         raw_df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
-        # Standaryzacja kolumn
+        # Dodajemy kolumnę pomocniczą do zaznaczania na iPadzie
+        if "WYBIERZ" not in df.columns:
+            df.insert(0, "WYBIERZ", False)
+
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
-
-        # DASHBOARD METRYKI
-        m1, m2, m3 = st.columns(3)
-        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
-        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
-        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
         # PRZYCISKI GŁÓWNE
         c_save, c_ref = st.columns(2)
@@ -80,70 +76,58 @@ if check_password():
 
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 PEŁNA BAZA"])
 
-        # FUNKCJA LINKÓW DLA iPada
-        def show_ipad_links(selection_state, current_df):
-            if selection_state.selection.rows:
-                idx = selection_state.selection.rows[0]
-                row = current_df.iloc[idx]
+        # Funkcja do wyświetlania przycisków linków pod tabelą (kompatybilna ze starszym Streamlit)
+        def show_links_legacy(edited_df):
+            # Szukamy wierszy, gdzie użytkownik zaznaczył checkbox "WYBIERZ"
+            selected = edited_df[edited_df["WYBIERZ"] == True]
+            if not selected.empty:
+                row = selected.iloc[0]
                 st.info(f"Opcje dla: **{row['Nazwa Projektu']}** ({row['Auto']})")
                 l1, l2, l3 = st.columns(3)
                 with l1:
-                    if "http" in str(row['spis casów']): st.link_button("📋 SPIS CASE'ÓW", row['spis casów'])
+                    if "http" in str(row['spis casów']): st.link_button("📋 OTWÓRZ SPIS", row['spis casów'])
                 with l2:
-                    if "http" in str(row['zdjęcie po załadunku']): st.link_button("📸 FOTO ZAŁADUNEK", row['zdjęcie po załadunku'])
+                    if "http" in str(row['zdjęcie po załadunku']): st.link_button("📸 FOTO", row['zdjęcie po załadunku'])
                 with l3:
-                    if "http" in str(row['SLOT']): st.link_button("⏰ SLOT / AWIZACJA", row['SLOT'])
+                    if "http" in str(row['SLOT']): st.link_button("⏰ SLOT", row['SLOT'])
 
         # --- TAB 1: MONTAŻE ---
         with tab_in:
-            search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
             mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_in = df[mask_in].copy()
-            if search_in:
-                df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
-            
-            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", 
-                                   column_config=column_cfg, on_select="rerun", 
-                                   selection_mode="single-row")
-            show_ipad_links(ed_in, df_in)
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            show_links_legacy(ed_in)
 
         # --- TAB 2: DEMONTAŻE ---
         with tab_out:
-            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
             mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
             df_out = df[mask_out].copy()
-            if search_out:
-                df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
-            
-            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", 
-                                    column_config=column_cfg, on_select="rerun", 
-                                    selection_mode="single-row")
-            show_ipad_links(ed_out, df_out)
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            show_links_legacy(ed_out)
 
-        # --- TAB 3: PEŁNA BAZA ---
+        # --- TAB 3: BAZA ---
         with tab_full:
-            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="s_full")
-            df_f = df.copy()
-            if search_f:
-                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            ed_full = st.data_editor(df_f, use_container_width=True, key="ed_full", column_config=column_cfg)
+            ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg)
 
         # --- LOGIKA ZAPISU ---
         if btn_save:
             final_df = df.copy()
-            # Iteracja przez stany sesji edytorów, aby wyłapać zmiany
-            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_full", df_f)]:
+            for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_full", df)]:
                 if key in st.session_state:
-                    edytowane = st.session_state[key].get("edited_rows", {})
-                    for row_idx_str, changes in edytowane.items():
-                        # Znajdujemy prawdziwy indeks w bazie głównej
+                    # 1. Pobieramy edytowany dataframe bezpośrednio z edytora
+                    edited_df = st.session_state[key].get("edited_rows", {})
+                    for row_idx_str, changes in edited_df.items():
                         real_idx = source_df.index[int(row_idx_str)]
                         for col, val in changes.items():
                             final_df.at[real_idx, col] = val
             
+            # Usuwamy kolumnę techniczną WYBIERZ przed zapisem do Google Sheets
+            if "WYBIERZ" in final_df.columns:
+                final_df = final_df.drop(columns=["WYBIERZ"])
+            
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("✅ ZMIANY ZAPISANE W ARKUSZU!")
+            st.success("✅ DANE ZAPISANE!")
             st.rerun()
 
     except Exception as e:
