@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. LOGOWANIE I PAMIĘĆ
+# 1. LOGOWANIE I ZABEZPIECZENIA
 controller = CookieController()
 
 def check_password():
@@ -28,19 +28,20 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Stylizacja pod iPada
+    # CSS - Stylizacja pod iPada (czytelność metryk i ramki notatki)
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
-        .notatka-box { 
+        .notatka-display { 
             background-color: #fff3cd; 
-            padding: 20px; 
-            border-radius: 10px; 
-            border-left: 10px solid #ffc107; 
+            padding: 25px; 
+            border-radius: 12px; 
+            border-left: 12px solid #ffc107; 
             margin: 20px 0;
-            font-size: 20px !important;
-            color: #856404;
+            font-size: 22px !important;
+            color: #333;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
         }
         </style>
         """, unsafe_allow_html=True)
@@ -48,14 +49,14 @@ if check_password():
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMN
+    # KONFIGURACJA KOLUMN - "Oko" przeniesione przed Notatkę
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
-        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
         "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
     }
 
@@ -63,20 +64,22 @@ if check_password():
         raw_df = conn.read(spreadsheet=URL, ttl=5).dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
-        # Dodajemy kolumnę techniczną do podglądu
-        if "PODGLĄD" not in df.columns:
-            df.insert(0, "PODGLĄD", False)
-
+        # Przygotowanie kolumn i ich kolejności
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
+        # Wstawienie kolumny PODGLĄD tuż przed NOTATKĄ
+        if "PODGLĄD" not in df.columns:
+            notatka_idx = df.columns.get_loc("NOTATKA")
+            df.insert(notatka_idx, "PODGLĄD", False)
+
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # METRYKI
+        # METRYKI OPERACYJNE
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
@@ -84,14 +87,14 @@ if check_password():
 
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # Funkcja podglądu notatki bez on_select
-        def render_notatka_viewer(edited_df):
+        def render_note_viewer(edited_df):
             selected = edited_df[edited_df["PODGLĄD"] == True]
             if not selected.empty:
                 row = selected.iloc[0]
                 st.markdown(f"""
-                <div class="notatka-box">
-                    <strong>PEŁNA NOTATKA ({row['Nazwa Projektu']}):</strong><br>
+                <div class="notatka-display">
+                    <strong>📋 PEŁNA TREŚĆ NOTATKI:</strong><br>
+                    <strong>Projekt:</strong> {row['Nazwa Projektu']} | <strong>Auto:</strong> {row['Auto']}<br><br>
                     {row['NOTATKA']}
                 </div>
                 """, unsafe_allow_html=True)
@@ -104,7 +107,7 @@ if check_password():
                 all_days = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c2:
                 st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in", placeholder="Nr projektu, auto...")
             with c3:
                 st.write("###")
                 if st.button("🔄 Odśwież", key="ref_in"):
@@ -120,7 +123,7 @@ if check_password():
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
-            render_notatka_viewer(ed_in)
+            render_note_viewer(ed_in)
 
         # --- DEMONTAŻE ---
         with tab_out:
@@ -131,7 +134,7 @@ if check_password():
                 df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
             
             ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
-            render_notatka_viewer(ed_out)
+            render_note_viewer(ed_out)
 
         # --- BAZA ---
         with tab_full:
@@ -140,9 +143,9 @@ if check_password():
             if search_f:
                 df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
             ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
-            render_notatka_viewer(ed_f)
+            render_note_viewer(ed_f)
 
-        # --- ZAPIS ---
+        # --- ZAPIS ZMIAN ---
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
@@ -154,17 +157,17 @@ if check_password():
                         for col, val in changes.items():
                             final_df.at[real_idx, col] = val
             
-            # Usuwamy kolumnę techniczną przed zapisem do GSheets
+            # Usunięcie kolumny PODGLĄD przed synchronizacją z Google Sheets
             if "PODGLĄD" in final_df.columns:
                 final_df = final_df.drop(columns=["PODGLĄD"])
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zapisano!")
+            st.success("Dane zsynchronizowane pomyślnie!")
             st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Błąd krytyczny: {e}")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
