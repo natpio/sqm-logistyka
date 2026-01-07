@@ -103,21 +103,26 @@ if check_password():
                     st.cache_data.clear()
                     st.rerun()
 
-            # Filtr: tylko to co NIE jest jeszcze rozładowane (lub w trakcie)
             mask_in = ~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_in = df[mask_in].copy()
 
+            # POPRAWKA FILTROWANIA DATY
             if not all_days_in:
-                df_in = df_in[df_in['Data'] == selected_date.strftime("%d.%m.%Y")]
+                # Bezpieczna konwersja kolumny na format daty
+                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
+                # Porównanie wybranej daty z kalendarza z datami w tabeli
+                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
+
             if sort_in:
                 df_in['t_date'] = pd.to_datetime(df_in['Data'], dayfirst=True, errors='coerce')
                 df_in = df_in.sort_values(by=['t_date', 'Godzina']).drop(columns=['t_date'])
+            
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
             updated_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
 
-        # --- TAB 2: DEMONTAŻE (KONCEPCJA 1) ---
+        # --- TAB 2: DEMONTAŻE ---
         with tab_out:
             st.subheader("Zarządzanie załadunkiem i wywozem (Load-out)")
             col_search_out, col_ref_out = st.columns([4, 1])
@@ -129,7 +134,6 @@ if check_password():
                     st.cache_data.clear()
                     st.rerun()
 
-            # Filtr: tylko to co JUŻ zostało rozładowane LUB jest w trakcie demontażu
             mask_out = df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)
             df_out = df[mask_out].copy()
 
@@ -158,7 +162,6 @@ if check_password():
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             try:
-                # Scalanie zmian ze wszystkich edytorów
                 if not updated_in.equals(df_in): df.update(updated_in)
                 if not updated_out.equals(df_out): df.update(updated_out)
                 if not updated_f.equals(df_f): df.update(updated_f)
