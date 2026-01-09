@@ -1,9 +1,10 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
+from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. AUTORYZACJA I ZABEZPIECZENIA
+# 1. LOGOWANIE I ZABEZPIECZENIA
 controller = CookieController()
 
 def check_password():
@@ -20,134 +21,155 @@ def check_password():
             st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
         st.title("🏗️ SQM Logistics - Control Tower")
-        st.text_input("Hasło dostępowe:", type="password", on_change=password_entered, key="password")
+        st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
         return False
     return True
 
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # 2. CSS - STYLIZACJA OPERACYJNA (UI/UX)
+    # CSS - Stylizacja interfejsu i ramki podglądu
     st.markdown("""
         <style>
-        .stButton button { height: 60px !important; border-radius: 10px !important; font-size: 15px !important; font-weight: bold !important; }
-        .filter-box { background-color: #f8f9fa; padding: 20px; border-radius: 15px; border: 1px solid #dee2e6; margin-bottom: 25px; }
-        .date-header { background-color: #1a1a1a; color: #ffffff; padding: 15px; border-radius: 10px; font-size: 24px; font-weight: bold; margin: 30px 0 15px 0; text-align: center; border-left: 10px solid #1f77b4; }
-        .truck-card { background-color: #ffffff; border: 2px solid #1f77b4; border-radius: 15px; padding: 20px; margin-bottom: 25px; box-shadow: 5px 5px 15px rgba(0,0,0,0.1); }
-        .project-row { background-color: #fdfdfd; border: 1px solid #eee; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
-        .slot-pill { background-color: #f1f3f5; padding: 4px 12px; border-radius: 15px; font-weight: bold; font-size: 14px; }
-        .status-tag { padding: 6px 12px; border-radius: 8px; font-weight: bold; color: white; text-align: center; font-size: 13px; }
+        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
+        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        .notatka-display { 
+            background-color: #fff3cd; 
+            padding: 25px; 
+            border-radius: 12px; 
+            border-left: 12px solid #ffc107; 
+            margin: 20px 0;
+            font-size: 20px !important;
+            color: #333;
+        }
         </style>
         """, unsafe_allow_html=True)
 
-    # 3. POŁĄCZENIE Z DANYMI
+    # POŁĄCZENIE Z BAZĄ
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    try:
-        with st.spinner('Aktualizacja danych z bazy...'):
-            df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
-            df = df.reset_index(drop=True)
+    # KONFIGURACJA KOLUMN (Oko przed Notatką)
+    status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
+    column_cfg = {
+        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
+    }
 
-        # Standaryzacja
-        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
+    try:
+        # POBIERANIE DANYCH Z PASKIEM ŁADOWANIA
+        with st.spinner('Pobieranie danych z Google Sheets...'):
+            raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+            df = raw_df.reset_index(drop=True)
+        
+        # Przygotowanie kolumn
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
-            df[col] = df[col].astype(str).replace(['nan', 'None'], '').str.strip()
+            df[col] = df[col].astype(str).replace('nan', '')
+
+        # Wstawienie kolumny PODGLĄD tuż przed NOTATKĄ
+        if "PODGLĄD" not in df.columns:
+            notatka_idx = df.columns.get_loc("NOTATKA")
+            df.insert(notatka_idx, "PODGLĄD", False)
+
+        statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # 4. NAWIGACJA
-        mode = st.radio("TRYB PRACY:", ["🛰️ RADAR OPERACYJNY", "🏗️ KREATOR WIDOKU", "📊 EDYCJA BAZY"], horizontal=True)
-        
-        # --- LOGIKA FILTROWANIA (Wspólna dla widoków i edycji) ---
-        st.markdown('<div class="filter-box">', unsafe_allow_html=True)
-        if mode != "📊 EDYCJA BAZY":
-            f1, f2, f3 = st.columns([2, 1, 1])
-            search = f1.text_input("🔍 Szukaj ładunku:", placeholder="Projekt, Auto, Kierowca...")
-            unique_hale = sorted(list(set([h for h in df['Hala'].unique() if h])))
-            hala_filter = f2.multiselect("📍 Hale:", options=unique_hale, default=unique_hale)
-            unique_stats = sorted(df['STATUS'].unique())
-            status_filter = f3.multiselect("🚦 Statusy:", options=unique_stats, default=unique_stats)
-        else:
-            # Wyszukiwarka dedykowana dla trybu EDYCJI
-            search = st.text_input("🔍 Szybkie wyszukiwanie w bazie do edycji:", placeholder="Wpisz np. numer rejestracyjny lub numer projektu...")
-        st.markdown('</div>', unsafe_allow_html=True)
+        # METRYKI
+        m1, m2, m3 = st.columns(3)
+        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
+        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
+        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        # Aplikowanie filtrów
-        display_df = df.copy()
-        if search:
-            display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
-        
-        if mode != "📊 EDYCJA BAZY":
-            if status_filter:
-                display_df = display_df[display_df['STATUS'].isin(status_filter)]
-            if hala_filter:
-                display_df = display_df[display_df['Hala'].isin(hala_filter)]
-            display_df = display_df.sort_values(by=['Data', 'Godzina', 'Auto'])
+        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # --- WIDOK 1: RADAR OPERACYJNY ---
-        if mode == "🛰️ RADAR OPERACYJNY":
-            dates = display_df['Data'].unique()
-            for d in dates:
-                st.markdown(f'<div class="date-header">📅 DZIEŃ: {d}</div>', unsafe_allow_html=True)
-                day_df = display_df[display_df['Data'] == d]
-                auta_w_dniu = day_df['Auto'].unique()
-                
-                active_trucks = [a for a in auta_w_dniu if any("ROZŁADOWANY" not in s.upper() for s in day_df[day_df['Auto'] == a]['STATUS'])]
-                done_trucks = [a for a in auta_w_dniu if a not in active_trucks]
+        def render_note_viewer(edited_df):
+            selected = edited_df[edited_df["PODGLĄD"] == True]
+            if not selected.empty:
+                row = selected.iloc[-1] # Wybiera ostatnio zaznaczone
+                st.markdown(f"""
+                <div class="notatka-display">
+                    <strong>📋 PEŁNA TREŚĆ NOTATKI:</strong><br>
+                    <strong>Projekt:</strong> {row['Nazwa Projektu']} | <strong>Auto:</strong> {row['Auto']}<br><br>
+                    {row['NOTATKA']}
+                </div>
+                """, unsafe_allow_html=True)
 
-                if active_trucks:
-                    for a_nr in active_trucks:
-                        t_data = day_df[day_df['Auto'] == a_nr]
-                        with st.container(border=True):
-                            h1, h2, h3 = st.columns([2, 2, 1])
-                            h1.markdown(f"### 🚚 {a_nr}")
-                            h1.caption(f"FIRMA: {t_data.iloc[0]['Przewoźnik']}")
-                            h2.markdown(f"👤 **{t_data.iloc[0]['Kierowca']}**")
-                            st.write("📦 **Ładunki:**")
-                            for idx, row in t_data.iterrows():
-                                st.markdown(f'<div class="project-row"><span class="slot-pill">Slot {row["Nr Slotu"]}</span> <b>{row["Nr Proj."]}</b> | {row["Nazwa Projektu"]}</div>', unsafe_allow_html=True)
-                                c_btns = st.columns(5)
-                                if "http" in row['zdjęcie po załadunku']: c_btns[0].link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
-                                if "http" in row['spis casów']: c_btns[1].link_button("📋 SPIS", row['spis casów'], use_container_width=True)
-                                if "http" in row['zrzut z currenta']: c_btns[2].link_button("🖼️ CURR", row['zrzut z currenta'], use_container_width=True)
-                                if row['NOTATKA']: 
-                                    with c_btns[3].expander("📝 NOTKA"): st.info(row['NOTATKA'])
-                                st_val = row['STATUS'].upper()
-                                st_col = "#d73a49" if "RAMP" in st_val else "#f9c000" if "TRASIE" in st_val else "#28a745" if "ROZŁADOWANY" in st_val else "#6c757d"
-                                c_btns[4].markdown(f'<div class="status-tag" style="background:{st_col};">{row["STATUS"]}</div>', unsafe_allow_html=True)
-                
-                if done_trucks:
-                    with st.expander(f"✅ ZAKOŃCZONE ({d})"):
-                        for a_nr in done_trucks: st.markdown(f"🚚 **{a_nr}** - Gotowe")
+        # --- MONTAŻE ---
+        with tab_in:
+            c1, c2, c3 = st.columns([1.5, 2, 1])
+            with c1:
+                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
+                all_days = st.checkbox("Wszystkie dni", value=True, key="a_in")
+            with c2:
+                st.write("##")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in", placeholder="Auto, Projekt...")
+            with c3:
+                st.write("###")
+                if st.button("🔄 Odśwież dane", key="ref_in"):
+                    st.cache_data.clear()
+                    st.rerun()
 
-        # --- WIDOK 2: KREATOR ---
-        elif mode == "🏗️ KREATOR WIDOKU":
-            cols = st.columns(2)
-            for i, (_, row) in enumerate(display_df.iterrows()):
-                with cols[i % 2]:
-                    with st.container(border=True):
-                        st.write(f"**{row['Data']} | Slot {row['Nr Slotu']}**")
-                        st.markdown(f"### {row['Nr Proj.']} | {row['Nazwa Projektu']}")
-                        st.write(f"🚚 {row['Auto']} | 👤 {row['Kierowca']}")
+            mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
+            df_in = df[mask_in].copy()
+            if not all_days:
+                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
+                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
+            if search_in:
+                df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
 
-        # --- WIDOK 3: EDYCJA BAZY (Z WYSZUKIWARKĄ) ---
-        else:
-            st.warning("Tryb edycji: Zmiany zostaną zapisane w Google Sheets. Użyj wyszukiwarki powyżej, aby odfiltrować wiersze.")
-            # Wyświetlamy przefiltrowany dataframe do edycji
-            edited_df = st.data_editor(display_df, use_container_width=True, num_rows="dynamic")
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            render_note_viewer(ed_in)
+
+        # --- DEMONTAŻE ---
+        with tab_out:
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
+            mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
+            df_out = df[mask_out].copy()
+            if search_out:
+                df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
             
-            if st.button("💾 ZAPISZ ZMIANY W ARKUSZU", type="primary", use_container_width=True):
-                # Scalanie zmian z oryginalnym df (na wypadek gdyby edytowano tylko fragment)
-                df.update(edited_df)
-                conn.update(spreadsheet=URL, data=df)
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            render_note_viewer(ed_out)
+
+        # --- BAZA ---
+        with tab_full:
+            search_f = st.text_input("🔍 Szukaj w bazie:", key="s_f")
+            df_f = df.copy()
+            if search_f:
+                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
+            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            render_note_viewer(ed_f)
+
+        # --- ZAPIS ---
+        st.divider()
+        if st.button("💾 ZAPISZ ZMIANY W ARKUSZU", type="primary", use_container_width=True):
+            with st.spinner('Trwa zapisywanie...'):
+                final_df = df.copy()
+                for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
+                    if key in st.session_state:
+                        edytowane = st.session_state[key].get("edited_rows", {})
+                        for row_idx_str, changes in edytowane.items():
+                            real_idx = source_df.index[int(row_idx_str)]
+                            for col, val in changes.items():
+                                final_df.at[real_idx, col] = val
+                
+                if "PODGLĄD" in final_df.columns:
+                    final_df = final_df.drop(columns=["PODGLĄD"])
+                
+                conn.update(spreadsheet=URL, data=final_df)
                 st.cache_data.clear()
-                st.success("Dane zostały pomyślnie zapisane!")
+                st.success("Zapis zakończony sukcesem!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Problem z połączeniem: {e}. Spróbuj odświeżyć stronę.")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
