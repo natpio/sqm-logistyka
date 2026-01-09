@@ -2,91 +2,90 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="SQM VISUAL YARD", layout="wide")
+# 1. KONFIGURACJA WIDOKU
+st.set_page_config(page_title="SQM TERMINAL", layout="wide")
 
-# --- STYLE MAPY (UX POZIOM 99) ---
 st.markdown("""
     <style>
-    .slot-container {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 15px;
-        padding: 10px;
-    }
-    .slot-box {
-        height: 180px;
-        border-radius: 15px;
-        border: 2px solid #333;
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        padding: 15px;
-        position: relative;
+    .stApp { background-color: #050505; }
+    /* Styl dużego numeru slotu */
+    .slot-card {
         background: #111;
+        border: 2px solid #333;
+        border-radius: 20px;
+        padding: 25px;
+        text-align: center;
+        margin-bottom: 20px;
     }
-    .slot-number { font-size: 12px; color: #888; font-weight: bold; }
-    .truck-plate { font-size: 22px; font-weight: 900; color: white; text-align: center; margin-top: 10px; }
-    .status-bar { height: 8px; border-radius: 4px; width: 100%; }
+    .status-active { border-color: #ff4b4b; background: #220a0a; }
+    .status-transit { border-color: #f9c000; background: #221d0a; }
     
-    /* STATUSY WIZUALNE */
-    .bg-ramp { background: linear-gradient(145deg, #441111, #aa0000); border-color: #ff4b4b; }
-    .bg-transit { background: linear-gradient(145deg, #332b00, #887700); border-color: #f9c000; }
-    .bg-done { background: #050505; border: 1px dashed #333; opacity: 0.5; }
-    .bg-empty { background: #0a0a0a; border: 1px dashed #222; }
+    .big-plate { font-size: 42px; font-weight: 900; color: white; line-height: 1; margin: 10px 0; }
+    .big-time { font-size: 24px; color: #f9c000; font-family: monospace; font-weight: bold; }
+    .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 2px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SILNIK DANYCH ---
+# 2. BEZPIECZNE POBIERANIE DANYCH
 URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
-df = conn.read(spreadsheet=URL, ttl="1m")
 
-# Wybór dnia i hal do wyświetlenia
-st.title("🛰️ SQM YARD CONTROL")
-t1, t2 = st.columns(2)
-day = t1.selectbox("DZIEŃ:", df['Data'].unique())
-selected_hala = t2.selectbox("HALA:", sorted(df['Hala'].unique()))
-
-day_df = df[(df['Data'] == day) & (df['Hala'] == selected_hala)]
-
-# --- RENDER MAPY SLOTÓW ---
-st.subheader(f"📍 Podgląd na żywo: HALA {selected_hala}")
-
-# Tworzymy siatkę slotów (np. od 1 do 10 lub na podstawie danych)
-max_slots = 12 # Możesz to zautomatyzować
-cols = st.columns(4) # 4 sloty w rzędzie
-
-for i in range(1, max_slots + 1):
-    slot_str = str(i)
-    # Szukamy czy w tym slocie jest auto
-    truck = day_df[day_df['Nr Slotu'].astype(str) == slot_str]
+try:
+    df = conn.read(spreadsheet=URL, ttl="1m")
     
-    with cols[(i-1) % 4]:
-        if not truck.empty:
-            row = truck.iloc[0]
-            status = str(row['STATUS']).upper()
+    # NAPRAWA BŁĘDU (TypeError)
+    # Zamieniamy wszystko na tekst i czyścimy puste wartości przed sortowaniem
+    df['Hala'] = df['Hala'].astype(str).replace(['nan', 'None'], '').str.strip()
+    
+    st.title("🛰️ SQM YARD TERMINAL")
+    
+    # Filtry na górze - proste i czytelne
+    c1, c2 = st.columns(2)
+    with c1:
+        day = st.selectbox("WYBIERZ DZIEŃ:", options=df['Data'].unique())
+    with c2:
+        # Tutaj naprawiona linia, która powodowała błąd:
+        hale_options = sorted([h for h in df['Hala'].unique() if h])
+        selected_hala = st.selectbox("WYBIERZ HALĘ:", options=hale_options)
+
+    # Filtrowanie danych
+    view_df = df[(df['Data'] == day) & (df['Hala'] == selected_hala)]
+    
+    # 3. WIDOK TERMINALA (Siatka Slotów)
+    st.write("---")
+    
+    # Grupowanie po numerze slotu (np. 1-10)
+    # Tworzymy listę slotów na podstawie tego co jest w bazie
+    available_slots = sorted(view_df['Nr Slotu'].unique(), key=lambda x: str(x))
+    
+    if not available_slots:
+        st.info("Brak zaplanowanych transportów na tę halę w wybranym dniu.")
+    else:
+        grid = st.columns(3) # 3 wielkie sloty w rzędzie
+        for idx, s_num in enumerate(available_slots):
+            trucks_in_slot = view_df[view_df['Nr Slotu'] == s_num]
             
-            # Klasa stylu na podstawie statusu
-            style_class = "bg-transit"
-            if "RAMP" in status: style_class = "bg-ramp"
-            if "ROZŁADOWANY" in status: style_class = "bg-done"
-            
-            st.markdown(f"""
-                <div class="slot-box {style_class}">
-                    <div class="slot-number">SLOT {slot_str} • {row['Godzina']}</div>
-                    <div class="truck-plate">{row['Auto']}</div>
-                    <div style="font-size: 11px; color: #ddd; text-align: center;">{row['Kierowca']}</div>
-                    <div style="font-size: 10px; font-weight: bold; color: white; text-align: center; background: rgba(0,0,0,0.3); border-radius: 5px;">{status}</div>
-                </div>
-            """, unsafe_allow_html=True)
-            
-            # Przyciski pod slotem
-            if "ROZŁADOWANY" not in status:
-                st.button(f"Zwolnij Slot {slot_str}", key=f"btn_{i}", use_container_width=True)
-        else:
-            st.markdown(f"""
-                <div class="slot-box bg-empty">
-                    <div class="slot-number">SLOT {slot_str}</div>
-                    <div class="truck-plate" style="color: #222; font-size: 14px;">WOLNY</div>
-                </div>
-            """, unsafe_allow_html=True)
+            for _, row in trucks_in_slot.iterrows():
+                status = str(row['STATUS']).upper()
+                card_class = "slot-card"
+                if "RAMP" in status: card_class += " status-active"
+                if "TRASIE" in status: card_class += " status-transit"
+                
+                with grid[idx % 3]:
+                    st.markdown(f"""
+                        <div class="{card_class}">
+                            <div class="label">SLOT {s_num}</div>
+                            <div class="big-time">{str(row['Godzina'])[:5]}</div>
+                            <div class="big-plate">{row['Auto']}</div>
+                            <div style="color:white; font-weight:bold;">{row['Kierowca']}</div>
+                            <div style="font-size:12px; color:#888; margin-top:10px;">{row['Nr Proj.']}</div>
+                            <div style="color:#1f77b4; font-size:14px; font-weight:bold;">{status}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Przyciski akcji - tylko jeśli są linki
+                    if "http" in str(row['spis casów']):
+                        st.link_button("📋 SPIS ŁADUNKU", row['spis casów'], use_container_width=True)
+
+except Exception as e:
+    st.error(f"Problem z arkuszem: {e}")
