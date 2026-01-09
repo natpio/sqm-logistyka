@@ -28,12 +28,10 @@ def check_password():
     return True
 
 if check_password():
-    # --- 3. STYLE CSS (Zaktualizowane o przedziałki) ---
+    # --- 3. STYLE CSS ---
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-        
-        /* Belka oddzielająca auta */
         .truck-separator {
             background-color: #2c3e50;
             color: white;
@@ -43,17 +41,13 @@ if check_password():
             display: flex;
             justify-content: space-between;
             align-items: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-
-        /* Styl Kafelka Projektu */
         .transport-card {
             background-color: #ffffff;
             border: 1px solid #e0e0e0;
             border-radius: 10px;
             padding: 15px;
             margin-bottom: 10px;
-            box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
             border-left: 8px solid #ccc;
         }
         .status-trasie { border-left-color: #ffeb3b; }
@@ -61,7 +55,6 @@ if check_password():
         .status-rozladowany { border-left-color: #4caf50; }
         .status-empties { border-left-color: #9e9e9e; }
         .status-zaladowany { border-left-color: #2196f3; }
-        
         hr.truck-line {
             border: 0;
             height: 2px;
@@ -80,29 +73,31 @@ if check_password():
             controller.remove("sqm_login_key")
             st.rerun()
 
-    # --- 5. POŁĄCZENIE I DANE ---
+    # --- 5. POŁĄCZENIE I KONFIGURACJA KOLUMN ---
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
+
+    # NOWA KONFIGURACJA KOLUMN (Zamiast linków - "Otwórz")
+    column_cfg = {
+        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"], width="medium"),
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Foto", display_text="Otwórz"),
+        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
+    }
 
     def render_grouped_tiles(dataframe):
         if dataframe.empty:
             st.info("Brak danych.")
             return
-        
         trucks = dataframe['Auto'].unique()
-        
         for truck in trucks:
             truck_data = dataframe[dataframe['Auto'] == truck]
             carrier = truck_data.iloc[0]['Przewoźnik']
-            
-            # --- PRZEDZIAŁKA (NAGŁÓWEK AUTA) ---
-            st.markdown(f"""
-                <div class="truck-separator">
-                    <span>🚛 AUTO: <b>{truck}</b></span>
-                    <span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {carrier}</span>
-                </div>
-            """, unsafe_allow_html=True)
-            
+            st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {carrier}</span></div>', unsafe_allow_html=True)
             t_cols = st.columns(3)
             for idx, (_, row) in enumerate(truck_data.iterrows()):
                 with t_cols[idx % 3]:
@@ -117,13 +112,8 @@ if check_password():
                     st.markdown(f"""
                         <div class="transport-card {s_class}">
                             <div style="font-size: 0.8em; color: #666;">{row['Data']} | Slot: {row['Nr Slotu']}</div>
-                            <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">
-                                [{row['Nr Proj.']}] {row['Nazwa Projektu']}
-                            </div>
-                            <div style="font-size: 0.9em; margin-bottom: 8px;">
-                                👤 {row['Kierowca']}<br>
-                                📍 Hala: {row['Hala']} | Godz: {row['Godzina']}
-                            </div>
+                            <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">[{row['Nr Proj.']}] {row['Nazwa Projektu']}</div>
+                            <div style="font-size: 0.9em; margin-bottom: 8px;">👤 {row['Kierowca']}<br>📍 Hala: {row['Hala']} | Godz: {row['Godzina']}</div>
                             <div style="font-weight: bold; text-align: center; background: #eee; border-radius: 4px; padding: 2px; font-size: 0.85em;">{row['STATUS']}</div>
                         </div>
                     """, unsafe_allow_html=True)
@@ -138,15 +128,13 @@ if check_password():
                     
                     with st.expander("📝 Notatka"):
                         st.write(row['NOTATKA'] if row['NOTATKA'] else "Brak")
-            
-            # Linia oddzielająca pod grupą (wizualna przedziałka)
             st.markdown('<hr class="truck-line">', unsafe_allow_html=True)
 
     try:
         raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
-        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
@@ -188,17 +176,8 @@ if check_password():
                     df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
                 if view_mode == "Tradycyjny":
-                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config={
-                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]),
-                        "spis casów": st.column_config.LinkColumn("📋 Spis"),
-                        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
-                        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current"),
-                        "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
-                        "PODGLĄD": st.column_config.CheckboxColumn("👁️"),
-                        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
-                    })
+                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg)
                     edit_trackers[f"ed_{key}"] = (df_view, ed)
-                    # Podgląd notatki
                     sel = ed[ed["PODGLĄD"] == True]
                     if not sel.empty:
                         row = sel.iloc[-1]
