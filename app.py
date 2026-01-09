@@ -26,13 +26,30 @@ def check_password():
     return True
 
 if check_password():
-    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="expanded")
 
-    # CSS - Stylizacja interfejsu i ramki podglądu notatki
+    # CSS - Stylizacja interfejsu, notatki oraz KAFELKÓW
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        
+        /* Styl Kafelka */
+        .transport-card {
+            background-color: #ffffff;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
+            border-left: 8px solid #ccc;
+        }
+        .status-trasie { border-left-color: #ffeb3b; }
+        .status-rampa { border-left-color: #f44336; }
+        .status-rozladowany { border-left-color: #4caf50; }
+        .status-empties { border-left-color: #9e9e9e; }
+        .status-zaladowany { border-left-color: #2196f3; }
+        
         .notatka-display { 
             background-color: #fff3cd; 
             padding: 25px; 
@@ -45,6 +62,15 @@ if check_password():
         }
         </style>
         """, unsafe_allow_html=True)
+
+    # WYBÓR WIDOKU W SIDEBARZE
+    with st.sidebar:
+        st.header("Ustawienia widoku")
+        view_mode = st.radio("Wybierz styl wyświetlania:", ["Tradycyjny", "Kafelkowy"])
+        st.divider()
+        if st.sidebar.button("Wyloguj"):
+            controller.remove("sqm_login_key")
+            st.rerun()
 
     # POŁĄCZENIE Z GOOGLE SHEETS
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
@@ -68,13 +94,11 @@ if check_password():
             raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = raw_df.reset_index(drop=True)
         
-        # Przygotowanie wszystkich kolumn (w tym nowej)
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
-        # Logika wstawienia kolumny PODGLĄD tuż przed NOTATKĄ
         if "PODGLĄD" not in df.columns:
             notatka_idx = df.columns.get_loc("NOTATKA")
             df.insert(notatka_idx, "PODGLĄD", False)
@@ -103,76 +127,113 @@ if check_password():
                 </div>
                 """, unsafe_allow_html=True)
 
-        # --- TAB: MONTAŻE ---
-        with tab_in:
-            c1, c2, c3 = st.columns([1.5, 2, 1])
-            with c1:
-                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
-                all_days = st.checkbox("Pokaż wszystkie dni", value=True, key="a_in")
-            with c2:
-                st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
-            with c3:
-                st.write("###")
-                if st.button("🔄 Odśwież listę", key="ref_in"):
-                    st.cache_data.clear()
-                    st.rerun()
-
-            mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
-            df_in = df[mask_in].copy()
-            if not all_days:
-                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
-                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
-            if search_in:
-                df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
-
-            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
-            render_note_viewer(ed_in)
-
-        # --- TAB: DEMONTAŻE ---
-        with tab_out:
-            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
-            mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
-            df_out = df[mask_out].copy()
-            if search_out:
-                df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
+        def render_tiles(dataframe):
+            if dataframe.empty:
+                st.info("Brak danych do wyświetlenia w tej kategorii.")
+                return
             
-            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
-            render_note_viewer(ed_out)
+            # Tworzymy siatkę 3 kafelki w rzędzie
+            cols = st.columns(3)
+            for idx, (_, row) in enumerate(dataframe.iterrows()):
+                col_idx = idx % 3
+                with cols[col_idx]:
+                    # Dobór klasy CSS na podstawie statusu
+                    status_class = ""
+                    s = row['STATUS'].upper()
+                    if "TRASIE" in s: status_class = "status-trasie"
+                    elif "RAMP" in s: status_class = "status-rampa"
+                    elif "ROZŁADOWANY" in s: status_class = "status-rozladowany"
+                    elif "EMPTIES" in s: status_class = "status-empties"
+                    elif "ZAŁADOWANY" in s: status_class = "status-zaladowany"
 
-        # --- TAB: BAZA PEŁNA ---
-        with tab_full:
-            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="s_f")
-            df_f = df.copy()
-            if search_f:
-                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
-            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
-            render_note_viewer(ed_f)
+                    st.markdown(f"""
+                        <div class="transport-card {status_class}">
+                            <div style="font-size: 0.8em; color: gray;">{row['Data']} | Slot: {row['Nr Slotu']}</div>
+                            <div style="font-weight: bold; font-size: 1.1em; margin: 5px 0;">{row['Nazwa Projektu']}</div>
+                            <div style="font-size: 0.9em;">
+                                🚛 <b>{row['Auto']}</b> ({row['Przewoźnik']})<br>
+                                👤 {row['Kierowca']}<br>
+                                📍 Hala: {row['Hala']} | Godz: {row['Godzina']}
+                            </div>
+                            <hr style="margin: 10px 0;">
+                            <div style="font-weight: bold; color: #1f77b4;">{row['STATUS']}</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Przyciski akcji pod kafelkiem (opcjonalne, bo widok kafelkowy jest głównie do podglądu)
+                    if row['SLOT']:
+                        st.link_button(f"Link do Slotu", row['SLOT'], use_container_width=True)
 
-        # --- GLOBALNY ZAPIS ZMIAN ---
-        st.divider()
-        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY W ARKUSZU", type="primary", use_container_width=True):
-            with st.spinner('Zapisywanie danych...'):
-                final_df = df.copy()
-                for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
-                    if key in st.session_state:
-                        edytowane = st.session_state[key].get("edited_rows", {})
-                        for row_idx_str, changes in edytowane.items():
-                            real_idx = source_df.index[int(row_idx_str)]
-                            for col, val in changes.items():
-                                final_df.at[real_idx, col] = val
+        # Logika filtracji i wyświetlania dla każdego taba
+        for tab, mask, key_prefix in [
+            (tab_in, ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), "in"),
+            (tab_out, df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), "out"),
+            (tab_full, None, "f")
+        ]:
+            with tab:
+                # Wspólne filtry dla tabów
+                c1, c2, c3 = st.columns([1.5, 2, 1])
+                with c1:
+                    if key_prefix == "in":
+                        selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key=f"d_{key_prefix}")
+                        all_days = st.checkbox("Pokaż wszystkie dni", value=True, key=f"a_{key_prefix}")
+                with c2:
+                    search_term = st.text_input("🔍 Szukaj ładunku:", key=f"s_{key_prefix}")
+                with c3:
+                    st.write("###")
+                    if st.button("🔄 Odśwież", key=f"ref_{key_prefix}"):
+                        st.cache_data.clear()
+                        st.rerun()
+
+                # Aplikacja filtrów
+                df_filtered = df[mask].copy() if mask is not None else df.copy()
                 
-                if "PODGLĄD" in final_df.columns:
-                    final_df = final_df.drop(columns=["PODGLĄD"])
+                if key_prefix == "in" and not all_days:
+                    df_filtered['Data_dt'] = pd.to_datetime(df_filtered['Data'], errors='coerce')
+                    df_filtered = df_filtered[df_filtered['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
                 
-                conn.update(spreadsheet=URL, data=final_df)
-                st.cache_data.clear()
-                st.success("Zapisano pomyślnie!")
-                st.rerun()
+                if search_term:
+                    df_filtered = df_filtered[df_filtered.apply(lambda r: r.astype(str).str.contains(search_term, case=False).any(), axis=1)]
+
+                # WYBÓR RENDEROWANIA
+                if view_mode == "Tradycyjny":
+                    ed = st.data_editor(df_filtered, use_container_width=True, key=f"ed_{key_prefix}", column_config=column_cfg)
+                    render_note_viewer(ed)
+                    # Przypisanie do zmiennych globalnych dla zapisu
+                    if key_prefix == "in": df_in, ed_in = df_filtered, ed
+                    elif key_prefix == "out": df_out, ed_out = df_filtered, ed
+                    elif key_prefix == "f": df_f, ed_f = df_filtered, ed
+                else:
+                    render_tiles(df_filtered)
+
+        # --- GLOBALNY ZAPIS ZMIAN (tylko w widoku tradycyjnym edycja jest aktywna) ---
+        if view_mode == "Tradycyjny":
+            st.divider()
+            if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY W ARKUSZU", type="primary", use_container_width=True):
+                with st.spinner('Zapisywanie danych...'):
+                    final_df = df.copy()
+                    for key in ["ed_in", "ed_out", "ed_f"]:
+                        if key in st.session_state:
+                            # Wybieramy odpowiedni source_df na podstawie klucza
+                            if key == "ed_in": s_df = df_in
+                            elif key == "ed_out": s_df = df_out
+                            else: s_df = df_f
+                            
+                            edytowane = st.session_state[key].get("edited_rows", {})
+                            for row_idx_str, changes in edytowane.items():
+                                real_idx = s_df.index[int(row_idx_str)]
+                                for col, val in changes.items():
+                                    final_df.at[real_idx, col] = val
+                    
+                    if "PODGLĄD" in final_df.columns:
+                        final_df = final_df.drop(columns=["PODGLĄD"])
+                    
+                    conn.update(spreadsheet=URL, data=final_df)
+                    st.cache_data.clear()
+                    st.success("Zapisano pomyślnie!")
+                    st.rerun()
+        else:
+            st.info("💡 Edycja danych (statusy, notatki) dostępna jest tylko w widoku 'Tradycyjnym'.")
 
     except Exception as e:
-        st.error(f"Błąd połączenia: {e}. Spróbuj odświeżyć stronę.")
-
-    if st.sidebar.button("Wyloguj"):
-        controller.remove("sqm_login_key")
-        st.rerun()
+        st.error(f"Wystąpił błąd: {e}")
