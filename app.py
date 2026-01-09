@@ -28,24 +28,16 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Poprawa wyglądu kart i przycisków
+    # CSS - Minimalistyczny styl dla maksymalnej czytelności na hali
     st.markdown("""
         <style>
-        [data-testid="column"] {
-            padding: 5px;
-        }
-        .main-card {
-            background-color: #f0f2f6;
-            padding: 15px;
-            border-radius: 15px;
-            border-left: 10px solid #1f77b4;
-            margin-bottom: 10px;
-        }
         .stButton button {
-            height: 60px;
-            font-weight: bold;
-            font-size: 18px !important;
+            height: 70px !important;
+            font-size: 20px !important;
+            border-radius: 12px !important;
         }
+        .main-header { font-size: 32px !important; font-weight: bold; color: #1f77b4; }
+        .slot-text { font-size: 24px !important; font-weight: bold; background-color: #f0f2f6; padding: 10px; border-radius: 8px; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -57,62 +49,59 @@ if check_password():
             df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = df.reset_index(drop=True)
 
-        # Ujednolicenie danych
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
         st.title("🏗️ SQM Control Tower")
-        
         view_mode = st.radio("Widok:", ["📦 OPERACYJNY (Karty)", "📊 EDYCJA (Tabela)"], horizontal=True)
 
         if view_mode == "📦 OPERACYJNY (Karty)":
-            search = st.text_input("🔍 Szukaj ładunku (Projekt, Auto, Hala):")
+            search = st.text_input("🔍 Szukaj ładunku:", placeholder="Projekt, Auto, Hala...")
             
             display_df = df.copy()
             if search:
                 display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
             
-            # Sortowanie po godzinie (najbliższe na górze)
             display_df = display_df.sort_values(by="Godzina")
 
-            for _, row in display_df.iterrows():
-                # Kontener karty - czysty Streamlit zamiast psującego się HTML
-                with st.container():
-                    st.markdown(f"### ⏰ {row['Godzina']} | {row['Nazwa Projektu']}")
+            for idx, row in display_df.iterrows():
+                with st.container(border=True):
+                    # NAGŁÓWEK: Godzina i Nazwa Projektu
+                    c_head1, c_head2 = st.columns([1, 4])
+                    c_head1.markdown(f"### ⏰ {row['Godzina']}")
+                    c_head2.markdown(f"### {row['Nazwa Projektu']}")
                     
-                    c1, c2 = st.columns([2, 1])
-                    with c1:
-                        st.markdown(f"**PROJEKT:** {row['Nr Proj.']} | **HALA:** {row['Hala']}")
-                        st.markdown(f"**TRANSPORT:** {row['Auto']} | **STATUS:** {row['STATUS']}")
+                    # SZCZEGÓŁY
+                    st.markdown(f"**PROJEKT:** {row['Nr Proj.']} | **HALA:** {row['Hala']} | **TRANSPORT:** {row['Auto']}")
+                    st.markdown(f"**STATUS:** {row['STATUS']}")
+
+                    # DUŻE PRZYCISKI - każdy z unikalnym kluczem idx
+                    b1, b2, b3, b4 = st.columns(4)
                     
-                    # DUŻE PRZYCISKI AKCJI
-                    btn1, btn2, btn3, btn4 = st.columns(4)
-                    
-                    if row['zdjęcie po załadunku'] and "http" in row['zdjęcie po załadunku']:
-                        btn1.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
+                    if "http" in row['zdjęcie po załadunku']:
+                        b1.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
                     else:
-                        btn1.button("📸 BRAK FOTO", disabled=True, use_container_width=True)
-                        
-                    if row['spis casów'] and "http" in row['spis casów']:
-                        btn2.link_button("📋 SPIS", row['spis casów'], use_container_width=True)
+                        b1.button("❌ BRAK FOTO", disabled=True, key=f"bf_{idx}", use_container_width=True)
+
+                    if "http" in row['spis casów']:
+                        b2.link_button("📋 SPIS", row['spis casów'], use_container_width=True)
                     else:
-                        btn2.button("📋 BRAK SPISU", disabled=True, use_container_width=True)
-                        
-                    if row['zrzut z currenta'] and "http" in row['zrzut z currenta']:
-                        btn3.link_button("🖼️ CURRENT", row['zrzut z currenta'], use_container_width=True)
+                        b2.button("❌ BRAK SPISU", disabled=True, key=f"bs_{idx}", use_container_width=True)
+
+                    if "http" in row['zrzut z currenta']:
+                        b3.link_button("🖼️ CURRENT", row['zrzut z currenta'], use_container_width=True)
                     else:
-                        btn3.button("🖼️ BRAK CURR", disabled=True, use_container_width=True)
-                        
+                        b3.button("❌ BRAK CURR", disabled=True, key=f"bc_{idx}", use_container_width=True)
+
                     if row['NOTATKA'].strip():
-                        with btn4.expander("📝 NOTATKA"):
-                            st.warning(row['NOTATKA'])
-                    
-                    st.divider()
+                        with b4.expander("📝 NOTATKA"):
+                            st.info(row['NOTATKA'])
+                st.write("") # Odstęp między kartami
 
         else:
-            # TRYB TABELI (Edycja)
+            # TRYB EDYCJI
             column_cfg = {
                 "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
@@ -121,7 +110,7 @@ if check_password():
                 "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
                 "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
             }
-            edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg, key="editor_v2")
+            edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg, key="editor_v3")
             
             if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 conn.update(spreadsheet=URL, data=edited_df)
