@@ -7,7 +7,7 @@ from streamlit_cookies_controller import CookieController
 # --- 1. KONFIGURACJA STRONY ---
 st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. AUTORYZACJA I PAMIĘĆ LOGOWANIA (COOKIES) ---
+# --- 2. AUTORYZACJA ---
 controller = CookieController()
 
 def check_password():
@@ -15,15 +15,12 @@ def check_password():
     if saved_auth == "Czaman2026":
         st.session_state["password_correct"] = True
         return True
-    
     def password_entered():
         if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
             controller.set("sqm_login_key", "Czaman2026", max_age=3600*24*30)
             del st.session_state["password"]
-        else:
-            st.session_state["password_correct"] = False
-
+        else: st.session_state["password_correct"] = False
     if "password_correct" not in st.session_state:
         st.title("🏗️ SQM Logistics - Control Tower")
         st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
@@ -31,27 +28,22 @@ def check_password():
     return True
 
 if check_password():
-    # --- 3. STYLE CSS ---
+    # --- 3. STYLE CSS (Zaktualizowane o przedziałki) ---
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
         
-        /* Styl Kontenera Grupy Auta */
-        .truck-group {
-            background-color: #f1f3f6;
-            padding: 15px;
-            border-radius: 15px;
-            margin-bottom: 25px;
-            border: 1px dashed #bfc9d4;
-        }
-        .truck-header {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #2c3e50;
-            margin-bottom: 10px;
+        /* Belka oddzielająca auta */
+        .truck-separator {
+            background-color: #2c3e50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            margin: 30px 0 15px 0;
             display: flex;
+            justify-content: space-between;
             align-items: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
         /* Styl Kafelka Projektu */
@@ -70,13 +62,11 @@ if check_password():
         .status-empties { border-left-color: #9e9e9e; }
         .status-zaladowany { border-left-color: #2196f3; }
         
-        .notatka-display { 
-            background-color: #fff3cd; 
-            padding: 20px; 
-            border-radius: 10px; 
-            border-left: 10px solid #ffc107; 
-            margin: 15px 0;
-            font-size: 18px !important;
+        hr.truck-line {
+            border: 0;
+            height: 2px;
+            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
+            margin-top: 40px;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -94,36 +84,25 @@ if check_password():
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # Konfiguracja dla edytora
-    column_cfg = {
-        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"], width="medium"),
-        "spis casów": st.column_config.LinkColumn("📋 Spis"),
-        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
-        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current"),
-        "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
-        "PODGLĄD": st.column_config.CheckboxColumn("👁️"),
-        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
-    }
-
-    # --- FUNKCJA RENDEROWANIA GRUPOWANEGO ---
     def render_grouped_tiles(dataframe):
         if dataframe.empty:
             st.info("Brak danych.")
             return
         
-        # Grupowanie po aucie (rejestracji)
         trucks = dataframe['Auto'].unique()
         
         for truck in trucks:
             truck_data = dataframe[dataframe['Auto'] == truck]
             carrier = truck_data.iloc[0]['Przewoźnik']
             
-            # Kontener dla auta
+            # --- PRZEDZIAŁKA (NAGŁÓWEK AUTA) ---
             st.markdown(f"""
-                <div class="truck-header">🚛 AUTO: {truck} <span style="font-size:0.7em; color:gray; margin-left:15px;">(Przewoźnik: {carrier})</span></div>
+                <div class="truck-separator">
+                    <span>🚛 AUTO: <b>{truck}</b></span>
+                    <span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {carrier}</span>
+                </div>
             """, unsafe_allow_html=True)
             
-            # Wyświetlamy kafelki ładunków pod tym autem w kolumnach
             t_cols = st.columns(3)
             for idx, (_, row) in enumerate(truck_data.iterrows()):
                 with t_cols[idx % 3]:
@@ -145,7 +124,7 @@ if check_password():
                                 👤 {row['Kierowca']}<br>
                                 📍 Hala: {row['Hala']} | Godz: {row['Godzina']}
                             </div>
-                            <div style="font-weight: bold; text-align: center; background: #eee; border-radius: 4px; padding: 2px;">{row['STATUS']}</div>
+                            <div style="font-weight: bold; text-align: center; background: #eee; border-radius: 4px; padding: 2px; font-size: 0.85em;">{row['STATUS']}</div>
                         </div>
                     """, unsafe_allow_html=True)
                     
@@ -159,7 +138,9 @@ if check_password():
                     
                     with st.expander("📝 Notatka"):
                         st.write(row['NOTATKA'] if row['NOTATKA'] else "Brak")
-            st.markdown("<br>", unsafe_allow_html=True)
+            
+            # Linia oddzielająca pod grupą (wizualna przedziałka)
+            st.markdown('<hr class="truck-line">', unsafe_allow_html=True)
 
     try:
         raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
@@ -207,13 +188,21 @@ if check_password():
                     df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
                 if view_mode == "Tradycyjny":
-                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg)
+                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config={
+                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]),
+                        "spis casów": st.column_config.LinkColumn("📋 Spis"),
+                        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
+                        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current"),
+                        "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
+                        "PODGLĄD": st.column_config.CheckboxColumn("👁️"),
+                        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
+                    })
                     edit_trackers[f"ed_{key}"] = (df_view, ed)
-                    # Podgląd notatki pod tabelą
+                    # Podgląd notatki
                     sel = ed[ed["PODGLĄD"] == True]
                     if not sel.empty:
                         row = sel.iloc[-1]
-                        st.markdown(f'<div class="notatka-display"><b>[{row["Nr Proj."]}] {row["Nazwa Projektu"]}</b><br>{row["NOTATKA"]}</div>', unsafe_allow_html=True)
+                        st.info(f"**[{row['Nr Proj.']}] {row['Nazwa Projektu']}**\n\n{row['NOTATKA']}")
                 else:
                     render_grouped_tiles(df_view)
 
@@ -227,7 +216,6 @@ if check_password():
                     for r_idx_str, col_ch in changes.items():
                         real_idx = s_df.index[int(r_idx_str)]
                         for col, val in col_ch.items(): final_df.at[real_idx, col] = val
-                
                 if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
                 conn.update(spreadsheet=URL, data=final_df)
                 st.cache_data.clear()
@@ -235,4 +223,4 @@ if check_password():
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd bazy: {e}")
+        st.error(f"Błąd: {e}")
