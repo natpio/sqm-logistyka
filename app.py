@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. AUTORYZACJA
+# 1. LOGOWANIE
 controller = CookieController()
 
 def check_password():
@@ -28,14 +28,14 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - High Visibility dla iPada
+    # CSS - Interfejs Dashboardowy
     st.markdown("""
         <style>
-        .stButton button { height: 75px !important; border-radius: 12px !important; font-weight: bold !important; font-size: 18px !important; }
-        .op-card-border { border: 2px solid #e1e4e8; border-radius: 15px; padding: 20px; margin-bottom: 20px; background-color: white; }
-        .status-box { padding: 10px; border-radius: 8px; text-align: center; font-weight: bold; color: white; min-width: 120px; }
-        .blink { color: #d73a49; animation: blink 2s infinite; font-weight: bold; }
-        @keyframes blink { 50% { opacity: 0.3; } }
+        .stButton button { height: 60px !important; border-radius: 10px !important; font-size: 16px !important; }
+        .hala-section { background-color: #f8f9fa; padding: 20px; border-radius: 20px; border: 1px solid #dee2e6; margin-bottom: 25px; }
+        .hala-title { font-size: 24px !important; font-weight: bold; color: #1f77b4; margin-bottom: 15px; border-bottom: 2px solid #1f77b4; }
+        .cargo-card { background: white; border-radius: 12px; padding: 15px; border-top: 5px solid #1f77b4; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        .urgent-card { border-top: 5px solid #d73a49 !important; background-color: #fff9f9; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -43,120 +43,68 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        with st.spinner('Synchronizacja danych SQM...'):
-            df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
-            df = df.reset_index(drop=True)
-
-        # Uzupełnienie kolumn
+        df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+        df = df.reset_index(drop=True)
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
-        st.title("🏗️ SQM Logistics Control Tower")
+        st.title("🏗️ SQM Logistics Radar")
         
-        # GŁÓWNY PRZEŁĄCZNIK WIDOKU
-        view_mode = st.radio("WYBIERZ TRYB PRACY:", ["🚀 WIDOK OPERACYJNY (Karty)", "📊 EDYCJA BAZY (Tabela)"], horizontal=True)
-        st.divider()
+        mode = st.radio("TRYB:", ["🛰️ RADAR HAL", "📊 EDYCJA BAZY"], horizontal=True)
 
-        if view_mode == "🚀 WIDOK OPERACYJNY (Karty)":
-            # Filtry szybkiego dostępu
-            c_f1, c_f2 = st.columns([2, 1])
-            search = c_f1.text_input("🔍 Szukaj projektu/auta:", placeholder="Wpisz nazwę...")
-            active_hala = c_f2.selectbox("Filtruj halę:", ["Wszystkie"] + sorted([h for h in df['Hala'].unique() if h]))
-
-            display_df = df.copy()
-            if search:
-                display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
-            if active_hala != "Wszystkie":
-                display_df = display_df[display_df['Hala'] == active_hala]
+        if mode == "🛰️ RADAR HAL":
+            # Inteligentne grupowanie po halach
+            hale = sorted([h for h in df['Hala'].unique() if h and h.strip() != ""])
             
-            display_df = display_df.sort_values(by="Godzina")
-
-            for idx, row in display_df.iterrows():
-                # Kolor statusu
-                stat = row['STATUS'].upper()
-                s_color = "#d73a49" if "RAMP" in stat else "#f9c000" if "TRASIE" in stat else "#28a745" if "ROZŁADOWANY" in stat else "#6a737d"
+            for h_name in hale:
+                st.markdown(f'<div class="hala-title">📍 HALA {h_name}</div>', unsafe_allow_html=True)
+                hala_df = df[df['Hala'] == h_name].sort_values(by="Godzina")
                 
-                with st.container():
-                    st.markdown(f"""
-                    <div class="op-card-border">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <span style="font-size: 14px; color: #6a737d;">SLOT: {row['Godzina']} | HALA: {row['Hala']}</span>
-                                <h1 style="margin: 0; padding: 0; font-size: 28px;">{row['Nazwa Projektu']}</h1>
-                                <span style="font-size: 16px;">PROJEKT: {row['Nr Proj.']} | AUTO: <b>{row['Auto']}</b></span>
-                            </div>
-                            <div class="status-box" style="background-color: {s_color};">
-                                {row['STATUS']}
-                            </div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    # DUŻE PRZYCISKI AKCJI
-                    b1, b2, b3, b4 = st.columns(4)
-                    
-                    def link_btn(col, label, emoji, link, key_id):
-                        if "http" in str(link):
-                            col.link_button(f"{emoji} {label}", link, use_container_width=True)
-                        else:
-                            col.button(f"❌ {label}", disabled=True, key=key_id, use_container_width=True)
-
-                    link_btn(b1, "FOTO ZAŁADUNEK", "📸", row['zdjęcie po załadunku'], f"bt_f_{idx}")
-                    link_btn(b2, "SPIS TOWARU", "📋", row['spis casów'], f"bt_s_{idx}")
-                    link_btn(b3, "CURRENT", "🖼️", row['zrzut z currenta'], f"bt_c_{idx}")
-                    
-                    with b4:
-                        if row['NOTATKA'].strip():
-                            with st.expander("📝 NOTATKA"):
-                                st.info(row['NOTATKA'])
-                        else:
-                            st.button("BRAK NOTATKI", disabled=True, key=f"bt_n_{idx}", use_container_width=True)
-                    st.write("##") # Odstęp
+                # Wyświetlamy karty w kolumnach (max 3 w rzędzie)
+                cols = st.columns(3)
+                for i, (_, row) in enumerate(hala_df.iterrows()):
+                    col_idx = i % 3
+                    with cols[col_idx]:
+                        is_ramp = "RAMP" in row['STATUS'].upper()
+                        card_class = "urgent-card" if is_ramp else ""
+                        
+                        with st.container(border=True):
+                            st.markdown(f"**{row['Godzina']}** | {row['STATUS']}")
+                            st.markdown(f"### {row['Nazwa Projektu']}")
+                            st.write(f"🚚 {row['Auto']} ({row['Kierowca']})")
+                            
+                            # Akcje (Expander zamiast miliona przycisków na raz)
+                            with st.expander("🛠️ NARZĘDZIA ŁADUNKU"):
+                                b1, b2 = st.columns(2)
+                                if "http" in row['zdjęcie po załadunku']: b1.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
+                                if "http" in row['spis casów']: b2.link_button("📋 SPIS", row['spis casów'], use_container_width=True)
+                                
+                                b3, b4 = st.columns(2)
+                                if "http" in row['zrzut z currenta']: b3.link_button("🖼️ CURR", row['zrzut z currenta'], use_container_width=True)
+                                if row['NOTATKA'].strip():
+                                    st.info(row['NOTATKA'])
+                st.divider()
 
         else:
-            # PRZYWRÓCONY WIDOK TABELI (EDYCJA)
-            st.info("Zmień dane w tabeli i kliknij ZAPISZ na dole strony.")
-            
+            # KLASYCZNA TABELA (EDYCYJNA)
+            st.write("### 📝 Edycja danych źródłowych")
             column_cfg = {
-                "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]),
+                "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY"]),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
                 "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
                 "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current"),
-                "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
-                "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
+                "SLOT": st.column_config.LinkColumn("⏰ SLOT")
             }
-            
-            # Podział na zakładki wewnątrz edycji
-            tab1, tab2 = st.tabs(["🚛 Aktywne Transporty", "📚 Pełna Baza"])
-            
-            with tab1:
-                df_active = df[~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|EMPTIES", na=False)].copy()
-                ed_active = st.data_editor(df_active, use_container_width=True, column_config=column_cfg, key="editor_active")
-            
-            with tab2:
-                ed_full = st.data_editor(df, use_container_width=True, column_config=column_cfg, key="editor_full")
-
-            st.divider()
-            if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
-                # Scalanie zmian z edytorów
-                final_df = df.copy()
-                for ed_key, source_df in [("editor_active", df_active), ("editor_full", df)]:
-                    if ed_key in st.session_state:
-                        edits = st.session_state[ed_key].get("edited_rows", {})
-                        for r_idx_str, changes in edits.items():
-                            real_idx = source_df.index[int(r_idx_str)]
-                            for col, val in changes.items():
-                                final_df.at[real_idx, col] = val
-                
-                conn.update(spreadsheet=URL, data=final_df)
+            edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg)
+            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
+                conn.update(spreadsheet=URL, data=edited_df)
                 st.cache_data.clear()
-                st.success("Dane zapisane w Google Sheets!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd krytyczny: {e}")
+        st.error(f"Błąd: {e}")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
