@@ -50,12 +50,13 @@ if check_password():
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMN (Oko 👁️ przed Notatką)
+    # KONFIGURACJA KOLUMN
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
         "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
         "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
@@ -67,8 +68,8 @@ if check_password():
             raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = raw_df.reset_index(drop=True)
         
-        # Przygotowanie brakujących kolumn
-        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
+        # Przygotowanie wszystkich kolumn (w tym nowej)
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
@@ -82,7 +83,7 @@ if check_password():
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # METRYKI OPERACYJNE (Liczniki na żywo)
+        # METRYKI
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
@@ -90,7 +91,6 @@ if check_password():
 
         tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # Funkcja wyświetlająca pełną notatkę pod tabelą
         def render_note_viewer(edited_df):
             selected = edited_df[edited_df["PODGLĄD"] == True]
             if not selected.empty:
@@ -111,7 +111,7 @@ if check_password():
                 all_days = st.checkbox("Pokaż wszystkie dni", value=True, key="a_in")
             with c2:
                 st.write("##")
-                search_in = st.text_input("🔍 Szukaj ładunku (Auto, Projekt, Hala):", key="s_in")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
             with c3:
                 st.write("###")
                 if st.button("🔄 Odśwież listę", key="ref_in"):
@@ -162,7 +162,6 @@ if check_password():
                             for col, val in changes.items():
                                 final_df.at[real_idx, col] = val
                 
-                # Usunięcie kolumny technicznej "PODGLĄD" przed zapisem
                 if "PODGLĄD" in final_df.columns:
                     final_df = final_df.drop(columns=["PODGLĄD"])
                 
@@ -172,7 +171,7 @@ if check_password():
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd połączenia: {e}. Spróbuj odświeżyć stronę w przeglądarce.")
+        st.error(f"Błąd połączenia: {e}. Spróbuj odświeżyć stronę.")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
