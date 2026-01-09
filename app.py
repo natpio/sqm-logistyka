@@ -4,7 +4,10 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. AUTORYZACJA I PAMIĘĆ LOGOWANIA (COOKIES)
+# --- 1. KONFIGURACJA STRONY ---
+st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="expanded")
+
+# --- 2. AUTORYZACJA I PAMIĘĆ LOGOWANIA (COOKIES) ---
 controller = CookieController()
 
 def check_password():
@@ -12,6 +15,7 @@ def check_password():
     if saved_auth == "Czaman2026":
         st.session_state["password_correct"] = True
         return True
+    
     def password_entered():
         if st.session_state["password"] == "Czaman2026":
             st.session_state["password_correct"] = True
@@ -19,16 +23,17 @@ def check_password():
             del st.session_state["password"]
         else:
             st.session_state["password_correct"] = False
+
     if "password_correct" not in st.session_state:
         st.title("🏗️ SQM Logistics - Control Tower")
         st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
+        if "password_correct" in st.session_state and not st.session_state["password_correct"]:
+            st.error("❌ Błędne hasło")
         return False
     return True
 
 if check_password():
-    st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="expanded")
-
-    # CSS - Stylizacja interfejsu, notatki oraz KAFELKÓW
+    # --- 3. STYLE CSS ---
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
@@ -40,7 +45,7 @@ if check_password():
             border: 1px solid #e0e0e0;
             border-radius: 10px;
             padding: 15px;
-            margin-bottom: 15px;
+            margin-bottom: 10px;
             box-shadow: 2px 2px 5px rgba(0,0,0,0.05);
             border-left: 8px solid #ccc;
         }
@@ -52,31 +57,30 @@ if check_password():
         
         .notatka-display { 
             background-color: #fff3cd; 
-            padding: 25px; 
-            border-radius: 12px; 
-            border-left: 12px solid #ffc107; 
-            margin: 20px 0;
-            font-size: 20px !important;
+            padding: 20px; 
+            border-radius: 10px; 
+            border-left: 10px solid #ffc107; 
+            margin: 15px 0;
+            font-size: 18px !important;
             color: #333;
-            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
         }
         </style>
         """, unsafe_allow_html=True)
 
-    # WYBÓR WIDOKU W SIDEBARZE
+    # --- 4. SIDEBAR I NAWIGACJA ---
     with st.sidebar:
-        st.header("Ustawienia widoku")
-        view_mode = st.radio("Wybierz styl wyświetlania:", ["Tradycyjny", "Kafelkowy"])
+        st.header("⚙️ Panel Sterowania")
+        view_mode = st.radio("Widok danych:", ["Tradycyjny", "Kafelkowy"])
         st.divider()
-        if st.sidebar.button("Wyloguj"):
+        if st.button("Wyloguj"):
             controller.remove("sqm_login_key")
             st.rerun()
 
-    # POŁĄCZENIE Z GOOGLE SHEETS
+    # --- 5. POŁĄCZENIE Z BAZĄ (G-SHEETS) ---
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
-    # KONFIGURACJA KOLUMN
+    # Konfiguracja kolumn dla edytora
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     column_cfg = {
         "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
@@ -88,152 +92,137 @@ if check_password():
         "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
     }
 
+    def render_tiles(dataframe):
+        if dataframe.empty:
+            st.info("Brak danych spełniających kryteria.")
+            return
+        
+        cols = st.columns(3)
+        for idx, (_, row) in enumerate(dataframe.iterrows()):
+            col_idx = idx % 3
+            with cols[col_idx]:
+                # Logika kolorów statusu
+                s = str(row['STATUS']).upper()
+                s_class = ""
+                if "TRASIE" in s: s_class = "status-trasie"
+                elif "RAMP" in s: s_class = "status-rampa"
+                elif "ROZŁADOWANY" in s: s_class = "status-rozladowany"
+                elif "EMPTIES" in s: s_class = "status-empties"
+                elif "ZAŁADOWANY" in s: s_class = "status-zaladowany"
+
+                st.markdown(f"""
+                    <div class="transport-card {s_class}">
+                        <div style="font-size: 0.8em; color: #666;">{row['Data']} | {row['Godzina']} | Hala: {row['Hala']}</div>
+                        <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">{row['Nazwa Projektu']}</div>
+                        <div style="background: #f8f9fb; padding: 8px; border-radius: 5px; font-size: 0.9em; margin-bottom: 8px;">
+                            🚛 <b>{row['Auto']}</b> | {row['Przewoźnik']}<br>
+                            👤 {row['Kierowca']}
+                        </div>
+                        <div style="font-weight: bold; text-align: center; border: 1px solid #ddd; padding: 3px; border-radius: 4px;">{row['STATUS']}</div>
+                    </div>
+                """, unsafe_allow_html=True)
+                
+                # Przyciski akcji
+                b1, b2 = st.columns(2)
+                with b1:
+                    if row['spis casów']: st.link_button("📋 Spis", row['spis casów'], use_container_width=True)
+                    if row['SLOT']: st.link_button("⏰ Slot", row['SLOT'], use_container_width=True)
+                with b2:
+                    if row['zdjęcie po załadunku']: st.link_button("📸 Foto", row['zdjęcie po załadunku'], use_container_width=True)
+                    if row['zrzut z currenta']: st.link_button("🖼️ Current", row['zrzut z currenta'], use_container_width=True)
+                
+                with st.expander("📝 Szczegóły / Notatka"):
+                    st.write(f"**Nr Projektu:** {row['Nr Proj.']}")
+                    st.write(f"**Notatka:** {row['NOTATKA'] if row['NOTATKA'] else 'Brak'}")
+                st.write("")
+
     try:
-        # POBIERANIE DANYCH
-        with st.spinner('Synchronizacja z bazą SQM...'):
+        with st.spinner('Pobieranie danych z bazy...'):
             raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = raw_df.reset_index(drop=True)
         
-        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
         if "PODGLĄD" not in df.columns:
-            notatka_idx = df.columns.get_loc("NOTATKA")
-            df.insert(notatka_idx, "PODGLĄD", False)
+            df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
         statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
+        # --- 6. NAGŁÓWEK I METRYKI ---
         st.title("🏗️ SQM Logistics Control Tower")
-        
-        # METRYKI
         m1, m2, m3 = st.columns(3)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
+        tabs = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 PEŁNA BAZA"])
+        
+        # Słownik do przechowywania edytowanych danych
+        edit_trackers = {}
 
-        def render_note_viewer(edited_df):
-            selected = edited_df[edited_df["PODGLĄD"] == True]
-            if not selected.empty:
-                row = selected.iloc[-1]
-                st.markdown(f"""
-                <div class="notatka-display">
-                    <strong>📋 SZCZEGÓŁY TRANSPORTU:</strong><br>
-                    <strong>Projekt:</strong> {row['Nazwa Projektu']} | <strong>Auto:</strong> {row['Auto']}<br><br>
-                    <strong>PEŁNA NOTATKA:</strong><br>{row['NOTATKA']}
-                </div>
-                """, unsafe_allow_html=True)
-
-        def render_tiles(dataframe):
-            if dataframe.empty:
-                st.info("Brak danych do wyświetlenia w tej kategorii.")
-                return
-            
-            # Tworzymy siatkę 3 kafelki w rzędzie
-            cols = st.columns(3)
-            for idx, (_, row) in enumerate(dataframe.iterrows()):
-                col_idx = idx % 3
-                with cols[col_idx]:
-                    # Dobór klasy CSS na podstawie statusu
-                    status_class = ""
-                    s = row['STATUS'].upper()
-                    if "TRASIE" in s: status_class = "status-trasie"
-                    elif "RAMP" in s: status_class = "status-rampa"
-                    elif "ROZŁADOWANY" in s: status_class = "status-rozladowany"
-                    elif "EMPTIES" in s: status_class = "status-empties"
-                    elif "ZAŁADOWANY" in s: status_class = "status-zaladowany"
-
-                    st.markdown(f"""
-                        <div class="transport-card {status_class}">
-                            <div style="font-size: 0.8em; color: gray;">{row['Data']} | Slot: {row['Nr Slotu']}</div>
-                            <div style="font-weight: bold; font-size: 1.1em; margin: 5px 0;">{row['Nazwa Projektu']}</div>
-                            <div style="font-size: 0.9em;">
-                                🚛 <b>{row['Auto']}</b> ({row['Przewoźnik']})<br>
-                                👤 {row['Kierowca']}<br>
-                                📍 Hala: {row['Hala']} | Godz: {row['Godzina']}
-                            </div>
-                            <hr style="margin: 10px 0;">
-                            <div style="font-weight: bold; color: #1f77b4;">{row['STATUS']}</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Przyciski akcji pod kafelkiem (opcjonalne, bo widok kafelkowy jest głównie do podglądu)
-                    if row['SLOT']:
-                        st.link_button(f"Link do Slotu", row['SLOT'], use_container_width=True)
-
-        # Logika filtracji i wyświetlania dla każdego taba
-        for tab, mask, key_prefix in [
-            (tab_in, ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), "in"),
-            (tab_out, df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), "out"),
-            (tab_full, None, "f")
-        ]:
+        for i, (tab, mask, key) in enumerate(zip(tabs, 
+                                                [~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), 
+                                                 df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), 
+                                                 None], 
+                                                ["in", "out", "full"])):
             with tab:
-                # Wspólne filtry dla tabów
                 c1, c2, c3 = st.columns([1.5, 2, 1])
                 with c1:
-                    if key_prefix == "in":
-                        selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key=f"d_{key_prefix}")
-                        all_days = st.checkbox("Pokaż wszystkie dni", value=True, key=f"a_{key_prefix}")
+                    if key == "in":
+                        d_val = st.date_input("Dzień rozładunku:", value=datetime.now(), key=f"d_{key}")
+                        all_d = st.checkbox("Pokaż wszystkie", value=True, key=f"a_{key}")
                 with c2:
-                    search_term = st.text_input("🔍 Szukaj ładunku:", key=f"s_{key_prefix}")
+                    search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
                 with c3:
                     st.write("###")
-                    if st.button("🔄 Odśwież", key=f"ref_{key_prefix}"):
+                    if st.button("🔄 Odśwież dane", key=f"r_{key}"):
                         st.cache_data.clear()
                         st.rerun()
 
-                # Aplikacja filtrów
-                df_filtered = df[mask].copy() if mask is not None else df.copy()
-                
-                if key_prefix == "in" and not all_days:
-                    df_filtered['Data_dt'] = pd.to_datetime(df_filtered['Data'], errors='coerce')
-                    df_filtered = df_filtered[df_filtered['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
-                
-                if search_term:
-                    df_filtered = df_filtered[df_filtered.apply(lambda r: r.astype(str).str.contains(search_term, case=False).any(), axis=1)]
+                # Filtrowanie
+                df_view = df[mask].copy() if mask is not None else df.copy()
+                if key == "in" and not all_d:
+                    df_view['Data_dt'] = pd.to_datetime(df_view['Data'], errors='coerce')
+                    df_view = df_view[df_view['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
+                if search:
+                    df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
-                # WYBÓR RENDEROWANIA
                 if view_mode == "Tradycyjny":
-                    ed = st.data_editor(df_filtered, use_container_width=True, key=f"ed_{key_prefix}", column_config=column_cfg)
-                    render_note_viewer(ed)
-                    # Przypisanie do zmiennych globalnych dla zapisu
-                    if key_prefix == "in": df_in, ed_in = df_filtered, ed
-                    elif key_prefix == "out": df_out, ed_out = df_filtered, ed
-                    elif key_prefix == "f": df_f, ed_f = df_filtered, ed
+                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg)
+                    edit_trackers[f"ed_{key}"] = (df_view, ed)
+                    
+                    # Podgląd dużej notatki
+                    selected = ed[ed["PODGLĄD"] == True]
+                    if not selected.empty:
+                        row = selected.iloc[-1]
+                        st.markdown(f'<div class="notatka-display"><b>Notatka ({row["Nazwa Projektu"]}):</b><br>{row["NOTATKA"]}</div>', unsafe_allow_html=True)
                 else:
-                    render_tiles(df_filtered)
+                    render_tiles(df_view)
 
-        # --- GLOBALNY ZAPIS ZMIAN (tylko w widoku tradycyjnym edycja jest aktywna) ---
+        # --- 7. ZAPIS DANYCH ---
         if view_mode == "Tradycyjny":
             st.divider()
-            if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY W ARKUSZU", type="primary", use_container_width=True):
-                with st.spinner('Zapisywanie danych...'):
+            if st.button("💾 ZAPISZ ZMIANY W ARKUSZU", type="primary", use_container_width=True):
+                with st.spinner('Aktualizacja Google Sheets...'):
                     final_df = df.copy()
-                    for key in ["ed_in", "ed_out", "ed_f"]:
-                        if key in st.session_state:
-                            # Wybieramy odpowiedni source_df na podstawie klucza
-                            if key == "ed_in": s_df = df_in
-                            elif key == "ed_out": s_df = df_out
-                            else: s_df = df_f
-                            
-                            edytowane = st.session_state[key].get("edited_rows", {})
-                            for row_idx_str, changes in edytowane.items():
-                                real_idx = s_df.index[int(row_idx_str)]
-                                for col, val in changes.items():
-                                    final_df.at[real_idx, col] = val
+                    for k in edit_trackers:
+                        source_df, edited_df = edit_trackers[k]
+                        changes = st.session_state[k].get("edited_rows", {})
+                        for row_idx_str, col_changes in changes.items():
+                            real_idx = source_df.index[int(row_idx_str)]
+                            for col, val in col_changes.items():
+                                final_df.at[real_idx, col] = val
                     
-                    if "PODGLĄD" in final_df.columns:
-                        final_df = final_df.drop(columns=["PODGLĄD"])
-                    
+                    if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
                     conn.update(spreadsheet=URL, data=final_df)
                     st.cache_data.clear()
-                    st.success("Zapisano pomyślnie!")
+                    st.success("Dane zapisane!")
                     st.rerun()
         else:
-            st.info("💡 Edycja danych (statusy, notatki) dostępna jest tylko w widoku 'Tradycyjnym'.")
+            st.info("💡 Tryb kafelkowy służy do podglądu. Aby edytować statusy lub notatki, przełącz na widok 'Tradycyjny'.")
 
     except Exception as e:
-        st.error(f"Wystąpił błąd: {e}")
+        st.error(f"⚠️ Błąd: {e}")
