@@ -34,7 +34,6 @@ if check_password():
         .filter-box { background-color: #f8f9fa; padding: 20px; border-radius: 15px; border: 1px solid #dee2e6; margin-bottom: 25px; }
         .date-header { background-color: #1a1a1a; color: #ffffff; padding: 15px; border-radius: 10px; font-size: 24px; font-weight: bold; margin: 30px 0 15px 0; text-align: center; border-left: 10px solid #1f77b4; }
         .truck-card { background-color: #ffffff; border: 2px solid #1f77b4; border-radius: 15px; padding: 20px; margin-bottom: 25px; box-shadow: 5px 5px 15px rgba(0,0,0,0.1); }
-        .truck-header { font-size: 22px; font-weight: bold; color: #1f77b4; border-bottom: 2px solid #f0f2f6; padding-bottom: 10px; margin-bottom: 15px; }
         .project-row { background-color: #fdfdfd; border: 1px solid #eee; padding: 12px; border-radius: 8px; margin-bottom: 10px; }
         .slot-pill { background-color: #f1f3f5; padding: 4px 12px; border-radius: 15px; font-weight: bold; font-size: 14px; }
         .status-tag { padding: 6px 12px; border-radius: 8px; font-weight: bold; color: white; text-align: center; font-size: 13px; }
@@ -58,122 +57,98 @@ if check_password():
 
         st.title("🏗️ SQM Logistics Control Tower")
         
-        # 4. NAWIGACJA I PANEL KONTROLNY
+        # 4. NAWIGACJA
         mode = st.radio("TRYB PRACY:", ["🛰️ RADAR OPERACYJNY", "🏗️ KREATOR WIDOKU", "📊 EDYCJA BAZY"], horizontal=True)
         
+        # --- LOGIKA FILTROWANIA (Wspólna dla widoków i edycji) ---
+        st.markdown('<div class="filter-box">', unsafe_allow_html=True)
         if mode != "📊 EDYCJA BAZY":
-            st.markdown('<div class="filter-box">', unsafe_allow_html=True)
             f1, f2, f3 = st.columns([2, 1, 1])
-            search = f1.text_input("🔍 Szukaj (Projekt, Auto, Kierowca, Przewoźnik):", placeholder="Wyszukaj dowolną frazę...")
-            
+            search = f1.text_input("🔍 Szukaj ładunku:", placeholder="Projekt, Auto, Kierowca...")
             unique_hale = sorted(list(set([h for h in df['Hala'].unique() if h])))
             hala_filter = f2.multiselect("📍 Hale:", options=unique_hale, default=unique_hale)
-            
             unique_stats = sorted(df['STATUS'].unique())
             status_filter = f3.multiselect("🚦 Statusy:", options=unique_stats, default=unique_stats)
-            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            # Wyszukiwarka dedykowana dla trybu EDYCJI
+            search = st.text_input("🔍 Szybkie wyszukiwanie w bazie do edycji:", placeholder="Wpisz np. numer rejestracyjny lub numer projektu...")
+        st.markdown('</div>', unsafe_allow_html=True)
 
-            # Filtrowanie
-            display_df = df.copy()
-            if search:
-                display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+        # Aplikowanie filtrów
+        display_df = df.copy()
+        if search:
+            display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+        
+        if mode != "📊 EDYCJA BAZY":
             if status_filter:
                 display_df = display_df[display_df['STATUS'].isin(status_filter)]
             if hala_filter:
                 display_df = display_df[display_df['Hala'].isin(hala_filter)]
-            
             display_df = display_df.sort_values(by=['Data', 'Godzina', 'Auto'])
 
-        # --- WIDOK 1: RADAR OPERACYJNY (GRUPOWANIE PO AUCIE) ---
+        # --- WIDOK 1: RADAR OPERACYJNY ---
         if mode == "🛰️ RADAR OPERACYJNY":
             dates = display_df['Data'].unique()
-            
             for d in dates:
                 st.markdown(f'<div class="date-header">📅 DZIEŃ: {d}</div>', unsafe_allow_html=True)
                 day_df = display_df[display_df['Data'] == d]
-                
-                # Rozdzielamy na aktywne (W TOKU) i rozładowane (GOTOWE)
-                # Auto jest aktywne, jeśli choć jeden jego projekt nie jest rozładowany
                 auta_w_dniu = day_df['Auto'].unique()
                 
-                # Podział aut na aktywne i zakończone
-                active_trucks = []
-                done_trucks = []
+                active_trucks = [a for a in auta_w_dniu if any("ROZŁADOWANY" not in s.upper() for s in day_df[day_df['Auto'] == a]['STATUS'])]
+                done_trucks = [a for a in auta_w_dniu if a not in active_trucks]
 
-                for a in auta_w_dniu:
-                    truck_data = day_df[day_df['Auto'] == a]
-                    if any("ROZŁADOWANY" not in s.upper() for s in truck_data['STATUS']):
-                        active_trucks.append(a)
-                    else:
-                        done_trucks.append(a)
-
-                # RENDER AUT AKTYWNYCH
                 if active_trucks:
                     for a_nr in active_trucks:
                         t_data = day_df[day_df['Auto'] == a_nr]
                         with st.container(border=True):
-                            # Nagłówek auta
                             h1, h2, h3 = st.columns([2, 2, 1])
                             h1.markdown(f"### 🚚 {a_nr}")
                             h1.caption(f"FIRMA: {t_data.iloc[0]['Przewoźnik']}")
                             h2.markdown(f"👤 **{t_data.iloc[0]['Kierowca']}**")
-                            
-                            # Lista projektów wewnątrz tego auta
-                            st.write("📦 **Ładunki na tym aucie:**")
+                            st.write("📦 **Ładunki:**")
                             for idx, row in t_data.iterrows():
-                                with st.container():
-                                    st.markdown(f"""
-                                    <div class="project-row">
-                                        <span class="slot-pill">Slot {row['Nr Slotu']} | ⏰ {row['Godzina']}</span> 
-                                        <b>{row['Nr Proj.']}</b> | {row['Nazwa Projektu']} | 📍 Hala: {row['Hala']}
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # Narzędzia dla projektu
-                                    c_btns = st.columns([1,1,1,1,1])
-                                    if "http" in row['zdjęcie po załadunku']: c_btns[0].link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
-                                    if "http" in row['spis casów']: c_btns[1].link_button("📋 SPIS", row['spis casów'], use_container_width=True)
-                                    if "http" in row['zrzut z currenta']: c_btns[2].link_button("🖼️ CURR", row['zrzut z currenta'], use_container_width=True)
-                                    if row['NOTATKA']: 
-                                        with c_btns[3].expander("📝 NOTKA"): st.info(row['NOTATKA'])
-                                    
-                                    # Kolorowy status konkretnego projektu
-                                    st_val = row['STATUS'].upper()
-                                    st_col = "#d73a49" if "RAMP" in st_val else "#f9c000" if "TRASIE" in st_val else "#28a745" if "ROZŁADOWANY" in st_val else "#6c757d"
-                                    c_btns[4].markdown(f'<div class="status-tag" style="background:{st_col};">{row["STATUS"]}</div>', unsafe_allow_html=True)
+                                st.markdown(f'<div class="project-row"><span class="slot-pill">Slot {row["Nr Slotu"]}</span> <b>{row["Nr Proj."]}</b> | {row["Nazwa Projektu"]}</div>', unsafe_allow_html=True)
+                                c_btns = st.columns(5)
+                                if "http" in row['zdjęcie po załadunku']: c_btns[0].link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
+                                if "http" in row['spis casów']: c_btns[1].link_button("📋 SPIS", row['spis casów'], use_container_width=True)
+                                if "http" in row['zrzut z currenta']: c_btns[2].link_button("🖼️ CURR", row['zrzut z currenta'], use_container_width=True)
+                                if row['NOTATKA']: 
+                                    with c_btns[3].expander("📝 NOTKA"): st.info(row['NOTATKA'])
+                                st_val = row['STATUS'].upper()
+                                st_col = "#d73a49" if "RAMP" in st_val else "#f9c000" if "TRASIE" in st_val else "#28a745" if "ROZŁADOWANY" in st_val else "#6c757d"
+                                c_btns[4].markdown(f'<div class="status-tag" style="background:{st_col};">{row["STATUS"]}</div>', unsafe_allow_html=True)
                 
-                # SEKCJA ROZŁADOWANYCH (W EXPANDERZE)
                 if done_trucks:
-                    with st.expander(f"✅ ZAKOŃCZONE TRANSPORTY ({d}) - Ilość aut: {len(done_trucks)}"):
-                        for a_nr in done_trucks:
-                            st.markdown(f"🚚 **{a_nr}** | Kierowca: {day_df[day_df['Auto']==a_nr].iloc[0]['Kierowca']} | Status: Gotowe")
+                    with st.expander(f"✅ ZAKOŃCZONE ({d})"):
+                        for a_nr in done_trucks: st.markdown(f"🚚 **{a_nr}** - Gotowe")
 
-        # --- WIDOK 2: KREATOR (Wszystkie dane płasko) ---
+        # --- WIDOK 2: KREATOR ---
         elif mode == "🏗️ KREATOR WIDOKU":
-            st.info("Widok klasyczny - każdy wpis to osobna karta")
             cols = st.columns(2)
             for i, (_, row) in enumerate(display_df.iterrows()):
                 with cols[i % 2]:
                     with st.container(border=True):
-                        st.write(f"**{row['Data']} | {row['Godzina']} | Slot {row['Nr Slotu']}**")
+                        st.write(f"**{row['Data']} | Slot {row['Nr Slotu']}**")
                         st.markdown(f"### {row['Nr Proj.']} | {row['Nazwa Projektu']}")
                         st.write(f"🚚 {row['Auto']} | 👤 {row['Kierowca']}")
-                        if st.button("Pokaż narzędzia", key=f"btn_{i}"):
-                            st.write(row['NOTATKA'])
 
-        # --- WIDOK 3: EDYCJA BAZY ---
+        # --- WIDOK 3: EDYCJA BAZY (Z WYSZUKIWARKĄ) ---
         else:
-            st.warning("Zmiany tutaj są zapisywane bezpośrednio w Google Sheets.")
-            edited_df = st.data_editor(df, use_container_width=True, num_rows="dynamic")
-            if st.button("💾 ZAPISZ ZMIANY WARKUSZU", type="primary", use_container_width=True):
-                conn.update(spreadsheet=URL, data=edited_df)
+            st.warning("Tryb edycji: Zmiany zostaną zapisane w Google Sheets. Użyj wyszukiwarki powyżej, aby odfiltrować wiersze.")
+            # Wyświetlamy przefiltrowany dataframe do edycji
+            edited_df = st.data_editor(display_df, use_container_width=True, num_rows="dynamic")
+            
+            if st.button("💾 ZAPISZ ZMIANY W ARKUSZU", type="primary", use_container_width=True):
+                # Scalanie zmian z oryginalnym df (na wypadek gdyby edytowano tylko fragment)
+                df.update(edited_df)
+                conn.update(spreadsheet=URL, data=df)
                 st.cache_data.clear()
-                st.success("Baza została zaktualizowana!")
+                st.success("Dane zostały pomyślnie zapisane!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Wystąpił błąd podczas ładowania: {e}")
+        st.error(f"Błąd: {e}")
 
-    if st.sidebar.button("Wyloguj operatora"):
+    if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
         st.rerun()
