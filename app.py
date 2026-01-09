@@ -27,7 +27,7 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Twój styl z dodatkiem dla sekcji archiwalnej
+    # CSS - Stylizacja kart i nagłówków
     st.markdown("""
         <style>
         .stButton button { height: 70px !important; border-radius: 10px !important; font-size: 16px !important; font-weight: bold !important; }
@@ -35,7 +35,6 @@ if check_password():
         .hala-banner { background-color: #1f77b4; color: white; padding: 10px 20px; border-radius: 8px; font-size: 20px; font-weight: bold; margin: 15px 0 10px 0; }
         .slot-pill { background-color: #f0f2f6; border: 1px solid #d1d5db; padding: 6px 15px; border-radius: 20px; font-size: 16px; font-weight: bold; color: #1f2937; }
         .status-tag { padding: 6px 12px; border-radius: 8px; font-weight: bold; color: white; text-align: center; }
-        .archive-header { background-color: #e9ecef; color: #6c757d; padding: 10px; border-radius: 8px; font-size: 18px; font-weight: bold; margin-top: 20px; border-left: 5px solid #28a745; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -53,23 +52,34 @@ if check_password():
             df[col] = df[col].astype(str).replace(['nan', 'None'], '')
 
         st.title("🏗️ SQM Control Tower")
+        
+        # NAWIGACJA
         mode = st.radio("WYBIERZ WIDOK:", ["🛰️ RADAR OPERACYJNY", "🏗️ KREATOR KAFELKA", "📊 EDYCJA BAZY"], horizontal=True)
         st.divider()
 
-        if mode != "📊 EDYCJA BAZY":
-            c_search, c_hala = st.columns([2, 1])
-            search = c_search.text_input("🔍 Szukaj ładunku...")
-            hala_filter = c_hala.multiselect("Filtruj Hale:", options=sorted(df['Hala'].unique()))
-
-            display_df = df.copy()
-            if search:
-                display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
-            if hala_filter:
-                display_df = display_df[display_df['Hala'].isin(hala_filter)]
+        # FILTRY W SIDEBARZE
+        with st.sidebar:
+            st.header("🔍 Filtry")
+            search = st.text_input("Szukaj tekstu:")
             
-            display_df = display_df.sort_values(by=['Data', 'Godzina'])
+            unique_statuses = sorted(df['STATUS'].unique())
+            status_filter = st.multiselect("Filtruj Statusy:", options=unique_statuses, default=unique_statuses)
+            
+            unique_hale = sorted([h for h in df['Hala'].unique() if h.strip()])
+            hala_filter = st.multiselect("Filtruj Hale:", options=unique_hale, default=unique_hale)
 
-        # --- FUNKCJA RENDERUJĄCA KAFELEK ---
+        # PRZETWARZANIE DANYCH
+        display_df = df.copy()
+        if search:
+            display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+        if status_filter:
+            display_df = display_df[display_df['STATUS'].isin(status_filter)]
+        if hala_filter:
+            display_df = display_df[display_df['Hala'].isin(hala_filter)]
+        
+        display_df = display_df.sort_values(by=['Data', 'Godzina'])
+
+        # FUNKCJA KAFELKA
         def draw_card(row, i, k_suffix):
             with st.container(border=True):
                 c1, c2 = st.columns([2, 1])
@@ -79,7 +89,7 @@ if check_password():
                 c2.markdown(f'<div class="status-tag" style="background-color: {bg_stat};">{row["STATUS"]}</div>', unsafe_allow_html=True)
                 
                 st.markdown(f"## {row['Nr Proj.']} | {row['Nazwa Projektu']}")
-                st.markdown(f"**PRZEWOŹNIK:** {row['Przewoźnik']}")
+                st.markdown(f"**PRZEWOŹNIK:** {row['Przewoźnik']} | **HALA:** {row['Hala']}")
                 st.markdown(f"🚚 **{row['Auto']}** | 👤 {row['Kierowca']}")
                 st.write("---")
                 
@@ -96,46 +106,45 @@ if check_password():
                         with st.expander("📝 NOTATKA"): st.info(row['NOTATKA'])
                     else: st.button("📝 --", disabled=True, key=f"n_{i}_{k_suffix}", use_container_width=True)
 
-        # --- WIDOK 1: RADAR OPERACYJNY ---
+        # WIDOK RADAR
         if mode == "🛰️ RADAR OPERACYJNY":
             dates = display_df['Data'].unique()
             for d in dates:
                 st.markdown(f'<div class="date-header">📅 DZIEŃ: {d}</div>', unsafe_allow_html=True)
                 date_df = display_df[display_df['Data'] == d]
                 
-                # PODZIAŁ: AKTYWNE vs ROZŁADOWANE
                 active_mask = ~date_df['STATUS'].str.contains("ROZŁADOWANY", case=False, na=False)
                 active_df = date_df[active_mask]
                 done_df = date_df[~active_mask]
 
-                # RENDER AKTYWNYCH
+                # Hale Aktywne
                 hale = sorted(active_df['Hala'].unique())
                 for h in hale:
                     st.markdown(f'<div class="hala-banner">📍 HALA {h} - W TOKU</div>', unsafe_allow_html=True)
                     hala_df = active_df[active_df['Hala'] == h]
                     cols = st.columns(2)
                     for i, (_, row) in enumerate(hala_df.iterrows()):
-                        draw_card(row, i, f"act_{d}_{h}")
+                        draw_card(row, i, f"radar_act_{d}_{h}")
 
-                # RENDER ZAKOŃCZONYCH (W EXPANDERZE)
+                # Rozładowane
                 if not done_df.empty:
-                    with st.expander(f"✅ ZOBACZ ROZŁADOWANE Z DNIA {d} ({len(done_df)})"):
+                    with st.expander(f"✅ ZOBACZ ROZŁADOWANE ({d})"):
                         cols_done = st.columns(2)
                         for i, (_, row) in enumerate(done_df.iterrows()):
-                            draw_card(row, i, f"done_{d}")
+                            draw_card(row, i, f"radar_done_{d}")
 
-        # --- WIDOK 2: KREATOR KAFELKA ---
+        # WIDOK KREATOR
         elif mode == "🏗️ KREATOR KAFELKA":
-            st.info("Personalizacja widoku.")
-            # ... (logika kreatora jak wcześniej, ale z podziałem na Aktywne/Gotowe)
-            # Dla uproszczenia tutaj stosujemy ten sam podział co w Radarze
-            st.write("Skonfiguruj widok w zakładce RADAR lub EDYCJA.")
-            st.warning("Ta sekcja zostanie rozbudowana o Twoje zapisane style w kolejnym kroku.")
+            st.info("Tryb uproszczony (wszystkie dane wybranej hali/statusu)")
+            cols_c = st.columns(2)
+            for i, (_, row) in enumerate(display_df.iterrows()):
+                with cols_c[i % 2]:
+                    draw_card(row, i, "custom")
 
-        # --- WIDOK 3: EDYCJA BAZY ---
+        # WIDOK EDYCJA
         else:
             column_cfg = {
-                "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY"]),
+                "STATUS": st.column_config.SelectboxColumn("STATUS", options=unique_statuses),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
                 "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
                 "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current")
@@ -144,7 +153,6 @@ if check_password():
             if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 conn.update(spreadsheet=URL, data=edited_df)
                 st.cache_data.clear()
-                st.success("Zapisano!")
                 st.rerun()
 
     except Exception as e:
