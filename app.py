@@ -56,12 +56,7 @@ if check_password():
             font-size: 16px;
             text-align: center;
             margin-bottom: 15px;
-        }
-        .filter-section {
-            background-color: #f1f3f5;
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 20px;
+            text-transform: uppercase;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -73,58 +68,63 @@ if check_password():
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
     
     try:
-        raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
-        df = raw_df.reset_index(drop=True)
+        # Pobieranie i czyszczenie danych
+        df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
         
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
-            df[col] = df[col].astype(str).replace('nan', '')
+            df[col] = df[col].astype(str).replace(['nan', 'None'], '').str.strip()
 
         st.title("🏗️ SQM Logistics Control Tower")
 
-        # 4. MULTI-FILTR (Dynamiczny)
-        with st.expander("🔍 PANEL FILTROWANIA I WYSZUKIWANIA", expanded=True):
-            f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+        # 4. PANEL FILTROWANIA (Działa na oba widoki)
+        with st.container(border=True):
+            st.subheader("🔍 Filtry operacyjne")
+            f1, f2, f3, f4 = st.columns(4)
             
-            # Pobieranie unikalnych wartości dla filtrów (zabezpieczenie przed TypeError)
-            def get_unique(col):
-                return sorted([x for x in df[col].unique() if x.strip()])
+            search_query = f1.text_input("Szukaj:", placeholder="Rejestracja, projekt...")
+            
+            # Bezpieczne pobieranie unikalnych wartości
+            hale_list = sorted([h for h in df['Hala'].unique() if h])
+            sel_hala = f2.multiselect("📍 Hala:", options=hale_list)
+            
+            sel_status = f3.multiselect("🚦 Status:", options=status_options)
+            
+            daty_list = sorted([d for d in df['Data'].unique() if d])
+            sel_date = f4.multiselect("📅 Data:", options=daty_list)
 
-            search_query = f_col1.text_input("Szukaj frazy:", placeholder="Rejestracja, projekt, kierowca...")
-            sel_hala = f_col2.multiselect("📍 Hala:", options=get_unique('Hala'))
-            sel_status = f_col3.multiselect("🚦 Status Auta:", options=status_options)
-            sel_date = f_col4.multiselect("📅 Data:", options=get_unique('Data'))
-
-        # Aplikowanie filtrów
-        filtered_df = df.copy()
+        # --- APLIKOWANIE FILTRÓW (Tworzymy view_df) ---
+        view_df = df.copy()
+        
         if search_query:
-            filtered_df = filtered_df[filtered_df.apply(lambda r: r.astype(str).str.contains(search_query, case=False).any(), axis=1)]
+            view_df = view_df[view_df.apply(lambda r: r.astype(str).str.contains(search_query, case=False).any(), axis=1)]
         if sel_hala:
-            filtered_df = filtered_df[filtered_df['Hala'].isin(sel_hala)]
+            view_df = view_df[view_df['Hala'].isin(sel_hala)]
         if sel_status:
-            filtered_df = filtered_df[filtered_df['STATUS'].isin(sel_status)]
+            view_df = view_df[view_df['STATUS'].isin(sel_status)]
         if sel_date:
-            filtered_df = filtered_df[filtered_df['Data'].isin(sel_date)]
+            view_df = view_df[view_df['Data'].isin(sel_date)]
 
-        # Wybór widoku
-        view_mode = st.radio("TRYB WYŚWIETLANIA:", ["📱 KAFELKI (AUTO-CENTRIC)", "📊 TABELA (EDYCJA DANYCH)"], horizontal=True)
+        # Tryb wyświetlania
+        view_mode = st.radio("WIDOK:", ["📱 KAFELKI", "📊 TABELA"], horizontal=True)
 
         # 5. RENDEROWANIE
-        if view_mode == "📊 TABELA (EDYCJA DANYCH)":
+        if view_mode == "📊 TABELA":
             column_cfg = {
                 "STATUS": st.column_config.SelectboxColumn("STATUS AUTA", options=status_options, width="medium"),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
                 "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
                 "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
             }
-            ed_df = st.data_editor(filtered_df, use_container_width=True, column_config=column_cfg, key="main_editor")
+            # Edytujemy tylko przefiltrowany widok
+            ed_df = st.data_editor(view_df, use_container_width=True, column_config=column_cfg, key="main_editor")
             
-            if st.button("💾 ZAPISZ ZMIANY W BAZIE", type="primary", use_container_width=True):
-                # Mapowanie zmian z powrotem do głównego df
+            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 edits = st.session_state["main_editor"].get("edited_rows", {})
                 for r_idx_str, changes in edits.items():
-                    real_idx = filtered_df.index[int(r_idx_str)]
+                    # Mapowanie indeksu z edytora na oryginalny DataFrame
+                    real_idx = view_df.index[int(r_idx_str)]
                     for col, val in changes.items():
                         df.at[real_idx, col] = val
                 
@@ -134,53 +134,51 @@ if check_password():
                 st.rerun()
 
         else:
-            # WIDOK KAFELKOWY (Grupowanie po AUCIE)
-            if filtered_df.empty:
-                st.warning("Brak transportów dla wybranych filtrów.")
+            # WIDOK KAFELKOWY (Używa tego samego view_df)
+            if view_df.empty:
+                st.info("Brak wyników dla wybranych filtrów.")
             else:
-                grouped = filtered_df.sort_values(['Data', 'Godzina']).groupby(['Data', 'Auto'])
+                # Grupujemy przefiltrowane dane
+                grouped = view_df.sort_values(['Data', 'Godzina']).groupby(['Data', 'Auto'])
                 
                 for (d_val, a_val), group in grouped:
-                    # Status bierzemy z pierwszego wiersza (bo auto ma jeden status)
                     st_val = str(group.iloc[0]['STATUS']).upper()
                     st_bg = "#d73a49" if "RAMP" in st_val else "#f9c000" if "TRASIE" in st_val else "#28a745" if "ROZŁADOWANY" in st_val else "#6c757d"
                     
-                    with st.container():
-                        st.markdown(f"""
-                        <div class="truck-group-card">
-                            <div class="main-status-bar" style="background:{st_bg};">{st_val}</div>
-                            <div style="display: flex; justify-content: space-between;">
-                                <div>
-                                    <span style="background:#333; color:white; padding:2px 8px; border-radius:4px; font-size:12px;">📅 {d_val}</span>
-                                    <h2 style="margin:5px 0; color:#1f77b4; font-size:36px;">🚚 {a_val}</h2>
-                                    <p style="margin:0;">Kierowca: <b>{group.iloc[0]['Kierowca']}</b> | Przewoźnik: {group.iloc[0]['Przewoźnik']}</p>
-                                </div>
-                                <div style="text-align:right;">
-                                    <div style="font-size:28px; font-weight:bold;">⏰ {group.iloc[0]['Godzina']}</div>
-                                    <div style="color:#666;">SLOT: {group.iloc[0]['Nr Slotu']}</div>
-                                </div>
+                    st.markdown(f"""
+                    <div class="truck-group-card">
+                        <div class="main-status-bar" style="background:{st_bg};">{st_val}</div>
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <div>
+                                <span style="color:#666; font-size:14px;">📅 {d_val} | ⏰ {group.iloc[0]['Godzina']}</span>
+                                <h2 style="margin:0; color:#1f77b4; font-size:32px;">🚚 {a_val}</h2>
+                                <p style="margin:0;">Kierowca: <b>{group.iloc[0]['Kierowca']}</b> | Przewoźnik: {group.iloc[0]['Przewoźnik']}</p>
                             </div>
-                            <div style="margin-top:15px; border-top: 1px solid #eee; padding-top:10px;">
-                                <b>📦 ŁADUNEK (PROJEKTY):</b>
-                        """, unsafe_allow_html=True)
-                        
-                        for _, row in group.iterrows():
-                            c1, c2 = st.columns([4, 1])
-                            with c1:
-                                st.markdown(f"""<div class="project-sub-row">
-                                    <b>{row['Nr Proj.']}</b> | {row['Nazwa Projektu']} | 📍 Hala: {row['Hala']}
-                                </div>""", unsafe_allow_html=True)
-                            with c2:
-                                btns = st.columns(3)
-                                if "http" in str(row['spis casów']): btns[0].link_button("📋", row['spis casów'])
-                                if "http" in str(row['zdjęcie po załadunku']): btns[1].link_button("📸", row['zdjęcie po załadunku'])
-                                if row['NOTATKA']:
-                                    with btns[2].expander("📝"): st.caption(row['NOTATKA'])
-                        
-                        st.markdown("</div></div>", unsafe_allow_html=True)
+                            <div style="text-align:right; background:#f0f2f6; padding:10px; border-radius:10px;">
+                                <span style="font-size:12px; color:#555;">SLOT</span><br>
+                                <span style="font-size:24px; font-weight:bold;">{group.iloc[0]['Nr Slotu']}</span>
+                            </div>
+                        </div>
+                        <div style="margin-top:15px; border-top: 1px solid #eee; padding-top:10px;">
+                    """, unsafe_allow_html=True)
+                    
+                    for _, row in group.iterrows():
+                        c1, c2 = st.columns([4, 1])
+                        with c1:
+                            st.markdown(f"""<div class="project-sub-row">
+                                <b>{row['Nr Proj.']}</b> | {row['Nazwa Projektu']} | 📍 Hala: {row['Hala']}
+                            </div>""", unsafe_allow_html=True)
+                        with c2:
+                            btns = st.columns(3)
+                            if "http" in str(row['spis casów']): btns[0].link_button("📋", row['spis casów'])
+                            if "http" in str(row['zdjęcie po załadunku']): btns[1].link_button("📸", row['zdjęcie po załadunku'])
+                            if row['NOTATKA']:
+                                with btns[2].expander("📝"): st.caption(row['NOTATKA'])
+                    
+                    st.markdown("</div></div>", unsafe_allow_html=True)
 
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Wystąpił błąd: {e}")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
