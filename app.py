@@ -2,107 +2,92 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-# 1. SETUP & THEME
-st.set_page_config(page_title="SQM COMMAND CENTER", layout="wide", initial_sidebar_state="collapsed")
+# 1. KONFIGURACJA (KRYTYCZNIE CZYSTA)
+st.set_page_config(page_title="SQM RADAR", layout="wide")
 
 st.markdown("""
     <style>
-    .stApp { background-color: #0d1117; color: #c9d1d9; }
+    .stApp { background-color: #050505; } /* Głęboka czerń dla kontrastu */
     
-    /* Header & Stats */
-    .main-title { font-size: 32px; font-weight: 900; letter-spacing: -1px; color: white; margin-bottom: 5px; }
-    .status-bar { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; margin-bottom: 30px; }
-    
-    /* Truck Card - Glassmorphism style */
-    .truck-card {
-        background: #1c2128;
-        border: 1px solid #30363d;
-        border-left: 5px solid #58a6ff;
-        border-radius: 10px;
+    /* Nagłówek Hali - Duży i czytelny */
+    .hala-header {
+        background: #1f77b4;
+        color: white;
+        padding: 20px;
+        text-align: center;
+        font-size: 30px;
+        font-weight: 900;
+        border-radius: 10px 10px 0 0;
+        margin-bottom: 2px;
+    }
+
+    /* Karta transportu - Minimalizm */
+    .truck-row {
+        background: #1a1a1a;
+        border-bottom: 2px solid #333;
         padding: 15px;
-        margin-bottom: 15px;
-        transition: 0.3s;
+        margin-bottom: 5px;
     }
-    .truck-card:hover { border-color: #58a6ff; background: #21262d; }
     
-    .truck-id { color: white; font-size: 20px; font-weight: bold; }
-    .driver-info { color: #8b949e; font-size: 13px; }
-    .slot-time { font-family: monospace; color: #58a6ff; font-weight: bold; font-size: 16px; }
+    .time-large { color: #f9c000; font-size: 24px; font-weight: bold; font-family: monospace; }
+    .plate-large { color: white; font-size: 26px; font-weight: 900; }
+    .project-sub { color: #888; font-size: 14px; text-transform: uppercase; }
     
-    /* Scrollable Timeline */
-    .scroll-container {
-        display: flex;
-        overflow-x: auto;
-        gap: 15px;
-        padding-bottom: 10px;
-    }
+    /* Statusy - Wyraźne kropki */
+    .dot { height: 15px; width: 15px; border-radius: 50%; display: inline-block; margin-right: 10px; }
+    .dot-red { background-color: #ff4b4b; box-shadow: 0 0 10px #ff4b4b; }
+    .dot-yellow { background-color: #f9c000; box-shadow: 0 0 10px #f9c000; }
+    .dot-green { background-color: #00c853; box-shadow: 0 0 10px #00c853; }
     </style>
     """, unsafe_allow_html=True)
 
-# 2. DATA LOAD
+# 2. POBIERANIE DANYCH
 try:
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
-    df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+    df = conn.read(spreadsheet=URL, ttl="1m")
 
-    # FIX: Standaryzacja typów danych
-    df['Hala'] = df['Hala'].astype(str).replace('nan', '')
-    df['Auto'] = df['Auto'].astype(str).replace('nan', 'BRAK MOCY')
-
-    # 3. HEADER
-    st.markdown('<div class="main-title">SQM LOGISTICS <span style="color:#58a6ff">TERMINAL</span></div>', unsafe_allow_html=True)
+    # Czyszczenie danych pod kątem czytelności
+    df['Hala'] = df['Hala'].astype(str).str.strip()
+    df['Godzina'] = df['Godzina'].astype(str).str[:5] # Tylko HH:MM
     
-    # 4. FILTRY (Centrum Dowodzenia)
-    with st.container():
-        c1, c2, c3 = st.columns([2, 1, 1])
-        search = c1.text_input("🔍 SEARCH SHIPMENT", placeholder="Enter Plate, Project or Driver...")
-        
-        # BEZPIECZNE SORTOWANIE HAL
-        hale_list = sorted([h for h in df['Hala'].unique() if h.strip()])
-        sel_hale = c2.multiselect("LOCATIONS", options=hale_list, default=hale_list)
-        
-        status_list = sorted(df['STATUS'].unique())
-        sel_stats = c3.multiselect("STATUS", options=status_list, default=status_list)
+    # Wybór dnia (tylko dzisiaj, żeby nie zaśmiecać)
+    today = st.selectbox("📅 WYBIERZ DZIEŃ OPERACYJNY", options=df['Data'].unique())
+    view_df = df[df['Data'] == today]
 
-    # Filtrowanie danych
-    filtered_df = df[(df['Hala'].isin(sel_hale)) & (df['STATUS'].isin(sel_stats))]
-    if search:
-        filtered_df = filtered_df[filtered_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+    # 3. UKŁAD KOLUMNOWY (KAŻDA HALA TO KOLUMNA)
+    hale_names = sorted([h for h in view_df['Hala'].unique() if h and h != 'nan'])
+    cols = st.columns(len(hale_names))
 
-    # 5. RENDER - MISSION CONTROL VIEW
-    for h_name in sel_hale:
-        st.markdown(f"### 📍 HALA {h_name}")
-        h_df = filtered_df[filtered_df['Hala'] == h_name].sort_values(by="Godzina")
-        
-        if h_df.empty:
-            st.caption("No active shipments for this location.")
-            continue
-
-        # Poziomy scroll dla naczep
-        cols = st.columns(len(h_df) if len(h_df) < 5 else 4) # Max 4 kafelki w rzędzie, reszta niżej
-        
-        for idx, (_, row) in enumerate(h_df.iterrows()):
-            with cols[idx % 4]:
+    for i, h_name in enumerate(hale_names):
+        with cols[i]:
+            st.markdown(f'<div class="hala-header">HALA {h_name}</div>', unsafe_allow_html=True)
+            
+            h_data = view_df[view_df['Hala'] == h_name].sort_values('Godzina')
+            
+            for _, row in h_data.iterrows():
+                # Logika koloru statusu
+                status = str(row['STATUS']).upper()
+                dot_class = "dot-yellow"
+                if "RAMP" in status: dot_class = "dot-red"
+                elif "ROZŁADOWANY" in status: dot_class = "dot-green"
+                
+                # Render wiersza transportu
                 st.markdown(f"""
-                    <div class="truck-card">
-                        <div style="display:flex; justify-content:space-between;">
-                            <span class="slot-time">⏰ {row['Godzina']}</span>
-                            <span style="font-size:10px; color:#8b949e;">SLOT {row['Nr Slotu']}</span>
+                    <div class="truck-row">
+                        <div class="time-large">{row['Godzina']}</div>
+                        <div class="plate-large">{row['Auto']}</div>
+                        <div style="margin: 5px 0;">
+                            <span class="{dot_class}"></span>
+                            <span style="color: white; font-weight: bold; font-size: 12px;">{status}</span>
                         </div>
-                        <div class="truck-id">{row['Auto']}</div>
-                        <div class="driver-info">👤 {row['Kierowca']}</div>
-                        <hr style="border:0; border-top:1px solid #30363d; margin:10px 0;">
-                        <div style="font-size:14px; font-weight:bold; color:#f0f6fc;">{row['Nr Proj.']}</div>
-                        <div style="font-size:12px; color:#8b949e;">{row['Nazwa Projektu']}</div>
+                        <div class="project-sub">{row['Nr Proj.']} | {row['Kierowca']}</div>
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # Interakcja pod kafelkiem
-                sub_c1, sub_c2 = st.columns(2)
+                # Tylko jeden, najważniejszy przycisk
                 if "http" in str(row['spis casów']):
-                    sub_c1.link_button("📋 LIST", row['spis casów'], use_container_width=True)
-                if "http" in str(row['zdjęcie po załadunku']):
-                    sub_c2.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
+                    st.link_button(f"📋 SPIS: {row['Nazwa Projektu']}", row['spis casów'], use_container_width=True)
 
 except Exception as e:
-    st.error(f"CRITICAL ERROR: {e}")
+    st.error("Błąd bazy danych. Sprawdź połączenie z arkuszem.")
