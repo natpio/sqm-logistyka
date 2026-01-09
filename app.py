@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
-# 1. KONFIGURACJA I AUTORYZACJA
+# 1. AUTORYZACJA I PAMIĘĆ LOGOWANIA (COOKIES)
 controller = CookieController()
 
 def check_password():
@@ -28,157 +28,150 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # 2. STYLIZACJA CSS
+    # CSS - Stylizacja interfejsu i ramki podglądu notatki
     st.markdown("""
         <style>
-        .truck-group-card {
-            background-color: #ffffff;
-            border: 1px solid #e0e0e0;
-            border-left: 8px solid #1f77b4;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 25px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        }
-        .project-sub-row {
-            background-color: #f8f9fa;
-            border-radius: 8px;
-            padding: 10px;
-            margin-top: 5px;
-            border: 1px solid #eee;
-            font-size: 14px;
-        }
-        .main-status-bar {
-            padding: 8px 15px;
-            border-radius: 8px;
-            color: white;
-            font-weight: bold;
-            font-size: 16px;
-            text-align: center;
-            margin-bottom: 15px;
-            text-transform: uppercase;
+        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
+        .stTabs [aria-selected="true"] { background-color: #1f77b4 !important; color: white !important; }
+        .notatka-display { 
+            background-color: #fff3cd; 
+            padding: 25px; 
+            border-radius: 12px; 
+            border-left: 12px solid #ffc107; 
+            margin: 20px 0;
+            font-size: 20px !important;
+            color: #333;
+            box-shadow: 2px 2px 10px rgba(0,0,0,0.1);
         }
         </style>
         """, unsafe_allow_html=True)
 
-    # 3. POŁĄCZENIE Z DANYMI
+    # POŁĄCZENIE Z GOOGLE SHEETS
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
+    # KONFIGURACJA KOLUMN
     status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]
-    
+    column_cfg = {
+        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
+        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+        "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+        "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
+        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+        "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small", default=False),
+        "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="medium")
+    }
+
     try:
-        # Pobieranie i czyszczenie danych
-        df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+        # POBIERANIE DANYCH
+        with st.spinner('Synchronizacja z bazą SQM...'):
+            raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+            df = raw_df.reset_index(drop=True)
         
-        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
+        # Przygotowanie wszystkich kolumn (w tym nowej)
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
-            df[col] = df[col].astype(str).replace(['nan', 'None'], '').str.strip()
+            df[col] = df[col].astype(str).replace('nan', '')
+
+        # Logika wstawienia kolumny PODGLĄD tuż przed NOTATKĄ
+        if "PODGLĄD" not in df.columns:
+            notatka_idx = df.columns.get_loc("NOTATKA")
+            df.insert(notatka_idx, "PODGLĄD", False)
+
+        statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
 
         st.title("🏗️ SQM Logistics Control Tower")
-
-        # 4. PANEL FILTROWANIA (Działa na oba widoki)
-        with st.container(border=True):
-            st.subheader("🔍 Filtry operacyjne")
-            f1, f2, f3, f4 = st.columns(4)
-            
-            search_query = f1.text_input("Szukaj:", placeholder="Rejestracja, projekt...")
-            
-            # Bezpieczne pobieranie unikalnych wartości
-            hale_list = sorted([h for h in df['Hala'].unique() if h])
-            sel_hala = f2.multiselect("📍 Hala:", options=hale_list)
-            
-            sel_status = f3.multiselect("🚦 Status:", options=status_options)
-            
-            daty_list = sorted([d for d in df['Data'].unique() if d])
-            sel_date = f4.multiselect("📅 Data:", options=daty_list)
-
-        # --- APLIKOWANIE FILTRÓW (Tworzymy view_df) ---
-        view_df = df.copy()
         
-        if search_query:
-            view_df = view_df[view_df.apply(lambda r: r.astype(str).str.contains(search_query, case=False).any(), axis=1)]
-        if sel_hala:
-            view_df = view_df[view_df['Hala'].isin(sel_hala)]
-        if sel_status:
-            view_df = view_df[view_df['STATUS'].isin(sel_status)]
-        if sel_date:
-            view_df = view_df[view_df['Data'].isin(sel_date)]
+        # METRYKI
+        m1, m2, m3 = st.columns(3)
+        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
+        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
+        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        # Tryb wyświetlania
-        view_mode = st.radio("WIDOK:", ["📱 KAFELKI", "📊 TABELA"], horizontal=True)
+        tab_in, tab_out, tab_full = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
 
-        # 5. RENDEROWANIE
-        if view_mode == "📊 TABELA":
-            column_cfg = {
-                "STATUS": st.column_config.SelectboxColumn("STATUS AUTA", options=status_options, width="medium"),
-                "spis casów": st.column_config.LinkColumn("📋 Spis"),
-                "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
-                "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
-            }
-            # Edytujemy tylko przefiltrowany widok
-            ed_df = st.data_editor(view_df, use_container_width=True, column_config=column_cfg, key="main_editor")
+        def render_note_viewer(edited_df):
+            selected = edited_df[edited_df["PODGLĄD"] == True]
+            if not selected.empty:
+                row = selected.iloc[-1]
+                st.markdown(f"""
+                <div class="notatka-display">
+                    <strong>📋 SZCZEGÓŁY TRANSPORTU:</strong><br>
+                    <strong>Projekt:</strong> {row['Nazwa Projektu']} | <strong>Auto:</strong> {row['Auto']}<br><br>
+                    <strong>PEŁNA NOTATKA:</strong><br>{row['NOTATKA']}
+                </div>
+                """, unsafe_allow_html=True)
+
+        # --- TAB: MONTAŻE ---
+        with tab_in:
+            c1, c2, c3 = st.columns([1.5, 2, 1])
+            with c1:
+                selected_date = st.date_input("Dzień rozładunku:", value=datetime.now(), key="d_in")
+                all_days = st.checkbox("Pokaż wszystkie dni", value=True, key="a_in")
+            with c2:
+                st.write("##")
+                search_in = st.text_input("🔍 Szukaj ładunku:", key="s_in")
+            with c3:
+                st.write("###")
+                if st.button("🔄 Odśwież listę", key="ref_in"):
+                    st.cache_data.clear()
+                    st.rerun()
+
+            mask_in = ~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
+            df_in = df[mask_in].copy()
+            if not all_days:
+                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
+                df_in = df_in[df_in['Data_dt'].dt.date == selected_date].drop(columns=['Data_dt'])
+            if search_in:
+                df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
+
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg)
+            render_note_viewer(ed_in)
+
+        # --- TAB: DEMONTAŻE ---
+        with tab_out:
+            search_out = st.text_input("🔍 Szukaj wywozu:", key="s_out")
+            mask_out = df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False)
+            df_out = df[mask_out].copy()
+            if search_out:
+                df_out = df_out[df_out.apply(lambda r: r.astype(str).str.contains(search_out, case=False).any(), axis=1)]
             
-            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
-                edits = st.session_state["main_editor"].get("edited_rows", {})
-                for r_idx_str, changes in edits.items():
-                    # Mapowanie indeksu z edytora na oryginalny DataFrame
-                    real_idx = view_df.index[int(r_idx_str)]
-                    for col, val in changes.items():
-                        df.at[real_idx, col] = val
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg)
+            render_note_viewer(ed_out)
+
+        # --- TAB: BAZA PEŁNA ---
+        with tab_full:
+            search_f = st.text_input("🔍 Szukaj w całej bazie:", key="s_f")
+            df_f = df.copy()
+            if search_f:
+                df_f = df_f[df_f.apply(lambda r: r.astype(str).str.contains(search_f, case=False).any(), axis=1)]
+            ed_f = st.data_editor(df_f, use_container_width=True, key="ed_f", column_config=column_cfg)
+            render_note_viewer(ed_f)
+
+        # --- GLOBALNY ZAPIS ZMIAN ---
+        st.divider()
+        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY W ARKUSZU", type="primary", use_container_width=True):
+            with st.spinner('Zapisywanie danych...'):
+                final_df = df.copy()
+                for key, source_df in [("ed_in", df_in), ("ed_out", df_out), ("ed_f", df_f)]:
+                    if key in st.session_state:
+                        edytowane = st.session_state[key].get("edited_rows", {})
+                        for row_idx_str, changes in edytowane.items():
+                            real_idx = source_df.index[int(row_idx_str)]
+                            for col, val in changes.items():
+                                final_df.at[real_idx, col] = val
                 
-                conn.update(spreadsheet=URL, data=df)
+                if "PODGLĄD" in final_df.columns:
+                    final_df = final_df.drop(columns=["PODGLĄD"])
+                
+                conn.update(spreadsheet=URL, data=final_df)
                 st.cache_data.clear()
                 st.success("Zapisano pomyślnie!")
                 st.rerun()
 
-        else:
-            # WIDOK KAFELKOWY (Używa tego samego view_df)
-            if view_df.empty:
-                st.info("Brak wyników dla wybranych filtrów.")
-            else:
-                # Grupujemy przefiltrowane dane
-                grouped = view_df.sort_values(['Data', 'Godzina']).groupby(['Data', 'Auto'])
-                
-                for (d_val, a_val), group in grouped:
-                    st_val = str(group.iloc[0]['STATUS']).upper()
-                    st_bg = "#d73a49" if "RAMP" in st_val else "#f9c000" if "TRASIE" in st_val else "#28a745" if "ROZŁADOWANY" in st_val else "#6c757d"
-                    
-                    st.markdown(f"""
-                    <div class="truck-group-card">
-                        <div class="main-status-bar" style="background:{st_bg};">{st_val}</div>
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <div>
-                                <span style="color:#666; font-size:14px;">📅 {d_val} | ⏰ {group.iloc[0]['Godzina']}</span>
-                                <h2 style="margin:0; color:#1f77b4; font-size:32px;">🚚 {a_val}</h2>
-                                <p style="margin:0;">Kierowca: <b>{group.iloc[0]['Kierowca']}</b> | Przewoźnik: {group.iloc[0]['Przewoźnik']}</p>
-                            </div>
-                            <div style="text-align:right; background:#f0f2f6; padding:10px; border-radius:10px;">
-                                <span style="font-size:12px; color:#555;">SLOT</span><br>
-                                <span style="font-size:24px; font-weight:bold;">{group.iloc[0]['Nr Slotu']}</span>
-                            </div>
-                        </div>
-                        <div style="margin-top:15px; border-top: 1px solid #eee; padding-top:10px;">
-                    """, unsafe_allow_html=True)
-                    
-                    for _, row in group.iterrows():
-                        c1, c2 = st.columns([4, 1])
-                        with c1:
-                            st.markdown(f"""<div class="project-sub-row">
-                                <b>{row['Nr Proj.']}</b> | {row['Nazwa Projektu']} | 📍 Hala: {row['Hala']}
-                            </div>""", unsafe_allow_html=True)
-                        with c2:
-                            btns = st.columns(3)
-                            if "http" in str(row['spis casów']): btns[0].link_button("📋", row['spis casów'])
-                            if "http" in str(row['zdjęcie po załadunku']): btns[1].link_button("📸", row['zdjęcie po załadunku'])
-                            if row['NOTATKA']:
-                                with btns[2].expander("📝"): st.caption(row['NOTATKA'])
-                    
-                    st.markdown("</div></div>", unsafe_allow_html=True)
-
     except Exception as e:
-        st.error(f"Wystąpił błąd: {e}")
+        st.error(f"Błąd połączenia: {e}. Spróbuj odświeżyć stronę.")
 
     if st.sidebar.button("Wyloguj"):
         controller.remove("sqm_login_key")
