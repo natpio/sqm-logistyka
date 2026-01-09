@@ -28,43 +28,24 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Nowoczesne, duże karty operacyjne
+    # CSS - Poprawa wyglądu kart i przycisków
     st.markdown("""
         <style>
-        .stMetric { background-color: #ffffff; border: 1px solid #dfe3e8; padding: 15px; border-radius: 12px; }
-        
-        /* Styl karty głównej */
-        .op-card {
-            background-color: #ffffff;
+        [data-testid="column"] {
+            padding: 5px;
+        }
+        .main-card {
+            background-color: #f0f2f6;
+            padding: 15px;
             border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            border: 1px solid #e1e4e8;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-            border-left: 12px solid #1f77b4;
+            border-left: 10px solid #1f77b4;
+            margin-bottom: 10px;
         }
-        
-        /* Kolory statusów dla kart */
-        .status-ramp { border-left-color: #d73a49 !important; background-color: #fff5f5; }
-        .status-trasie { border-left-color: #f9c000 !important; background-color: #fffdf2; }
-        
-        /* Nagłówki w karcie */
-        .proj-name { font-size: 26px !important; font-weight: 800; color: #1a1c21; line-height: 1.2; margin-bottom: 5px; }
-        .proj-nr { font-size: 18px; color: #586069; font-weight: 400; }
-        
-        /* Slot czasowy */
-        .slot-badge {
-            background-color: #1a1c21;
-            color: white;
-            padding: 8px 15px;
-            border-radius: 8px;
-            font-size: 20px;
-            font-weight: 700;
-            float: right;
+        .stButton button {
+            height: 60px;
+            font-weight: bold;
+            font-size: 18px !important;
         }
-        
-        .info-row { margin-top: 15px; font-size: 16px; color: #24292e; }
-        .label { color: #6a737d; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -72,10 +53,11 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        with st.spinner('Synchronizacja...'):
+        with st.spinner('Pobieranie danych...'):
             df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = df.reset_index(drop=True)
 
+        # Ujednolicenie danych
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
@@ -86,55 +68,51 @@ if check_password():
         view_mode = st.radio("Widok:", ["📦 OPERACYJNY (Karty)", "📊 EDYCJA (Tabela)"], horizontal=True)
 
         if view_mode == "📦 OPERACYJNY (Karty)":
-            st.write("##")
-            c_search, c_filter = st.columns([2, 1])
-            search = c_search.text_input("🔍 Szybkie szukanie (Projekt, Auto, Kierowca):", placeholder="Wpisz cokolwiek...")
+            search = st.text_input("🔍 Szukaj ładunku (Projekt, Auto, Hala):")
             
-            # Filtrowanie
             display_df = df.copy()
             if search:
                 display_df = display_df[display_df.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
             
-            # Sortowanie po godzinie slotu
+            # Sortowanie po godzinie (najbliższe na górze)
             display_df = display_df.sort_values(by="Godzina")
 
             for _, row in display_df.iterrows():
-                # Dobór klasy koloru
-                card_style = "op-card"
-                if "RAMP" in row['STATUS']: card_style += " status-ramp"
-                if "TRASIE" in row['STATUS']: card_style += " status-trasie"
-
-                st.markdown(f"""
-                <div class="{card_style}">
-                    <div class="slot-badge">⏰ {row['Godzina']}</div>
-                    <div class="proj-name">{row['Nazwa Projektu']}</div>
-                    <div class="proj-nr">PROJEKT: {row['Nr Proj.']} | HALA: {row['Hala']}</div>
+                # Kontener karty - czysty Streamlit zamiast psującego się HTML
+                with st.container():
+                    st.markdown(f"### ⏰ {row['Godzina']} | {row['Nazwa Projektu']}")
                     
-                    <div class="info-row">
-                        <span class="label">Transport:</span> <b>{row['Auto']}</b> ({row['Kierowca']}) | {row['Przewoźnik']}<br>
-                        <span class="label">Status:</span> {row['STATUS']}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # PRZYCISKI AKCJI - DUŻE I WYGODNE
-                col1, col2, col3, col4 = st.columns(4)
-                
-                if row['zdjęcie po załadunku']:
-                    col1.link_button("📸 FOTO ZAŁADUNEK", row['zdjęcie po załadunku'], use_container_width=True, type="secondary")
-                if row['spis casów']:
-                    col2.link_button("📋 SPIS TOWARU", row['spis casów'], use_container_width=True, type="secondary")
-                if row['zrzut z currenta']:
-                    col3.link_button("🖼️ CURRENT", row['zrzut z currenta'], use_container_width=True, type="secondary")
-                if row['NOTATKA'] and row['NOTATKA'].strip() != "":
-                    with col4.expander("📝 NOTATKA"):
-                        st.info(row['NOTATKA'])
-                
-                st.markdown("<br>", unsafe_allow_html=True)
+                    c1, c2 = st.columns([2, 1])
+                    with c1:
+                        st.markdown(f"**PROJEKT:** {row['Nr Proj.']} | **HALA:** {row['Hala']}")
+                        st.markdown(f"**TRANSPORT:** {row['Auto']} | **STATUS:** {row['STATUS']}")
+                    
+                    # DUŻE PRZYCISKI AKCJI
+                    btn1, btn2, btn3, btn4 = st.columns(4)
+                    
+                    if row['zdjęcie po załadunku'] and "http" in row['zdjęcie po załadunku']:
+                        btn1.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
+                    else:
+                        btn1.button("📸 BRAK FOTO", disabled=True, use_container_width=True)
+                        
+                    if row['spis casów'] and "http" in row['spis casów']:
+                        btn2.link_button("📋 SPIS", row['spis casów'], use_container_width=True)
+                    else:
+                        btn2.button("📋 BRAK SPISU", disabled=True, use_container_width=True)
+                        
+                    if row['zrzut z currenta'] and "http" in row['zrzut z currenta']:
+                        btn3.link_button("🖼️ CURRENT", row['zrzut z currenta'], use_container_width=True)
+                    else:
+                        btn3.button("🖼️ BRAK CURR", disabled=True, use_container_width=True)
+                        
+                    if row['NOTATKA'].strip():
+                        with btn4.expander("📝 NOTATKA"):
+                            st.warning(row['NOTATKA'])
+                    
+                    st.divider()
 
         else:
-            # TRYB TABELI (Twoja sprawdzona edycja)
-            st.info("Tryb edycji danych. Pamiętaj o kliknięciu ZAPISZ na dole.")
+            # TRYB TABELI (Edycja)
             column_cfg = {
                 "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"]),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
@@ -143,9 +121,9 @@ if check_password():
                 "SLOT": st.column_config.LinkColumn("⏰ SLOT"),
                 "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
             }
-            edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg, key="editor")
+            edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg, key="editor_v2")
             
-            if st.button("💾 ZAPISZ ZMIANY W BAZIE", type="primary", use_container_width=True):
+            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 conn.update(spreadsheet=URL, data=edited_df)
                 st.cache_data.clear()
                 st.success("Zapisano!")
