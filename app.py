@@ -28,13 +28,13 @@ def check_password():
 if check_password():
     st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="collapsed")
 
-    # CSS - Interfejs Operacyjny (duże przyciski i wyraźne karty)
+    # CSS - Maksymalna czytelność i duże przyciski
     st.markdown("""
         <style>
-        .stButton button { height: 65px !important; border-radius: 8px !important; font-size: 14px !important; font-weight: bold !important; }
-        .hala-banner { background-color: #1f77b4; color: white; padding: 10px 20px; border-radius: 10px; font-size: 24px; font-weight: bold; margin: 20px 0; }
-        .card-container { border: 1px solid #dee2e6; border-radius: 15px; padding: 15px; background-color: #ffffff; box-shadow: 2px 2px 10px rgba(0,0,0,0.05); }
-        .status-dot { height: 12px; width: 12px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .stButton button { height: 70px !important; border-radius: 10px !important; font-size: 16px !important; font-weight: bold !important; }
+        .hala-banner { background-color: #1f77b4; color: white; padding: 12px 25px; border-radius: 10px; font-size: 26px; font-weight: bold; margin: 25px 0 15px 0; }
+        .slot-pill { background-color: #f0f2f6; border: 1px solid #d1d5db; padding: 4px 12px; border-radius: 20px; font-size: 18px; font-weight: bold; color: #1f2937; }
+        .status-tag { padding: 6px 12px; border-radius: 8px; font-weight: bold; color: white; text-align: center; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -42,11 +42,13 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        with st.spinner('Synchronizacja danych...'):
+        with st.spinner('Synchronizacja...'):
             df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
             df = df.reset_index(drop=True)
 
-        for col in ['Data', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'NOTATKA']:
+        # Standaryzacja kolumn
+        all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'NOTATKA']
+        for col in all_cols:
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
@@ -60,66 +62,65 @@ if check_password():
                 st.markdown(f'<div class="hala-banner">📍 HALA {h_name}</div>', unsafe_allow_html=True)
                 hala_df = df[df['Hala'] == h_name].sort_values(by="Godzina")
                 
-                # Układ 2 kart na rząd dla iPada/Mobile
+                # Układ 2 kart na rząd
                 cols = st.columns(2)
                 for i, (_, row) in enumerate(hala_df.iterrows()):
                     with cols[i % 2]:
                         with st.container(border=True):
-                            # Górna belka: Slot i Status
-                            c1, c2 = st.columns([1, 1])
-                            c1.markdown(f"### ⏰ {row['Godzina']}")
-                            c2.markdown(f"**STATUS:** {row['STATUS']}")
+                            # NAGŁÓWEK KARTY: Slot + Czas | Status
+                            c1, c2 = st.columns([2, 1])
+                            c1.markdown(f'<span class="slot-pill">SLOT {row["Nr Slotu"]} | ⏰ {row["Godzina"]}</span>', unsafe_allow_html=True)
                             
-                            # Środek: Projekt
-                            st.markdown(f"## {row['Nazwa Projektu']}")
-                            st.markdown(f"**ID:** {row['Nr Proj.']} | **PRZEWOŹNIK:** {row['Przewoźnik']}")
+                            # Kolorowanie statusu
+                            stat = row['STATUS'].upper()
+                            bg_stat = "#d73a49" if "RAMP" in stat else "#f9c000" if "TRASIE" in stat else "#28a745" if "ROZŁADOWANY" in stat else "#6a737d"
+                            c2.markdown(f'<div class="status-tag" style="background-color: {bg_stat};">{row["STATUS"]}</div>', unsafe_allow_html=True)
+                            
+                            st.write("") # Odstęp
+                            
+                            # PROJEKT: Numer i Nazwa tej samej wielkości
+                            st.markdown(f"## {row['Nr Proj.']} | {row['Nazwa Projektu']}")
+                            
+                            # LOGISTYKA: Przewoźnik, Auto, Kierowca
+                            st.markdown(f"**PRZEWOŹNIK:** {row['Przewoźnik']}")
                             st.markdown(f"🚚 **{row['Auto']}** | 👤 {row['Kierowca']}")
                             
                             st.write("---")
-                            st.caption("🛠️ NARZĘDZIA ŁADUNKU")
                             
-                            # Narzędzia - 4 duże przyciski
+                            # NARZĘDZIA ŁADUNKU - 4 duże przyciski
                             t1, t2, t3, t4 = st.columns(4)
                             
-                            # Przycisk FOTO
-                            if "http" in row['zdjęcie po załadunku']:
-                                t1.link_button("📸 FOTO", row['zdjęcie po załadunku'], use_container_width=True)
-                            else:
-                                t1.button("📸 --", disabled=True, key=f"f_{i}_{h_name}", use_container_width=True)
+                            def render_btn(col, label, emoji, link, key_id):
+                                if "http" in str(link):
+                                    col.link_button(f"{emoji} {label}", link, use_container_width=True)
+                                else:
+                                    col.button(f"{emoji} --", disabled=True, key=key_id, use_container_width=True)
 
-                            # Przycisk SPIS
-                            if "http" in row['spis casów']:
-                                t2.link_button("📋 SPIS", row['spis casów'], use_container_width=True)
-                            else:
-                                t2.button("📋 --", disabled=True, key=f"s_{i}_{h_name}", use_container_width=True)
-
-                            # Przycisk CURRENT
-                            if "http" in row['zrzut z currenta']:
-                                t3.link_button("🖼️ CURR", row['zrzut z currenta'], use_container_width=True)
-                            else:
-                                t3.button("🖼️ --", disabled=True, key=f"c_{i}_{h_name}", use_container_width=True)
-
-                            # Przycisk NOTATKA
-                            if row['NOTATKA'].strip():
-                                with t4.expander("📝 NOTKA"):
-                                    st.info(row['NOTATKA'])
-                            else:
-                                t4.button("📝 --", disabled=True, key=f"n_{i}_{h_name}", use_container_width=True)
+                            render_btn(t1, "FOTO", "📸", row['zdjęcie po załadunku'], f"f_{i}_{h_name}")
+                            render_btn(t2, "SPIS", "📋", row['spis casów'], f"s_{i}_{h_name}")
+                            render_btn(t3, "CURR", "🖼️", row['zrzut z currenta'], f"c_{i}_{h_name}")
+                            
+                            with t4:
+                                if row['NOTATKA'].strip():
+                                    with st.expander("📝 NOTATKA"):
+                                        st.info(row['NOTATKA'])
+                                else:
+                                    st.button("📝 --", disabled=True, key=f"n_{i}_{h_name}", use_container_width=True)
 
         else:
-            # TRYB EDYCJI
+            # TRYB EDYCJI (Klasyczna tabela)
             column_cfg = {
                 "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY"]),
                 "spis casów": st.column_config.LinkColumn("📋 Spis"),
                 "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto"),
                 "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current"),
-                "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
+                "SLOT": st.column_config.LinkColumn("⏰ SLOT")
             }
             edited_df = st.data_editor(df, use_container_width=True, column_config=column_cfg)
-            if st.button("💾 ZAPISZ ZMIANY W GOOGLE SHEETS", type="primary", use_container_width=True):
+            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 conn.update(spreadsheet=URL, data=edited_df)
                 st.cache_data.clear()
-                st.success("Baza zaktualizowana!")
+                st.success("Zapisano!")
                 st.rerun()
 
     except Exception as e:
