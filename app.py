@@ -55,6 +55,7 @@ if check_password():
         .status-rozladowany { border-left-color: #4caf50; }
         .status-empties { border-left-color: #9e9e9e; }
         .status-zaladowany { border-left-color: #2196f3; }
+        .status-pusty { border-left-color: #ffffff; border-left-style: dashed; }
         hr.truck-line {
             border: 0;
             height: 2px;
@@ -80,7 +81,7 @@ if check_password():
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
-        # --- 5. SIDEBAR (WIDOK I FILTRY) ---
+        # --- 5. SIDEBAR ---
         with st.sidebar:
             st.header("⚙️ Ustawienia")
             view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
@@ -99,7 +100,7 @@ if check_password():
 
         # Konfiguracja dla edytora
         column_cfg = {
-            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ status-planned"], width="medium"),
+            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY", "⚪ status-planned"], width="medium"),
             "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
@@ -110,7 +111,6 @@ if check_password():
         }
 
         def render_grouped_tiles(dataframe):
-            # Aplikacja filtrów z Sidebar
             dff = dataframe.copy()
             if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
             if f_status: dff = dff[dff['STATUS'].isin(f_status)]
@@ -135,6 +135,7 @@ if check_password():
                         elif "ROZŁADOWANY" in s: s_class = "status-rozladowany"
                         elif "EMPTIES" in s: s_class = "status-empties"
                         elif "ZAŁADOWANY" in s: s_class = "status-zaladowany"
+                        elif "PUSTY" in s: s_class = "status-pusty"
 
                         st.markdown(f"""
                             <div class="transport-card {s_class}">
@@ -164,11 +165,25 @@ if check_password():
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        tabs = st.tabs(["📅 MONTAŻE", "🔄 DEMONTAŻE", "📚 BAZA"])
-        statusy_wyjazdowe = "ROZŁADOWANY|ZAŁADOWANY|EMPTIES"
+        # LOGIKA ZAKŁADEK (Zmieniona zgodnie z prośbą o EMPTIES)
+        tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📚 BAZA"])
+        
+        statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY" # Usunięto EMPTIES stąd
+        statusy_puste = "PUSTY|EMPTIES" # EMPTIES wpada tutaj
+
+        # Montaże: wszystko co nie jest rozładowane/załadowane i nie jest puste/empties
+        mask_montaze = (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & (~df['STATUS'].str.contains(statusy_puste, na=False, case=False))
+        # Rozładowane: tylko ROZŁADOWANY i ZAŁADOWANY
+        mask_rozladowane = df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)
+        # Puste Trucki: PUSTY oraz EMPTIES
+        mask_puste = df['STATUS'].str.contains(statusy_puste, na=False, case=False)
+
+        masks = [mask_montaze, mask_rozladowane, mask_puste, None]
+        keys = ["in", "out", "empty", "full"]
+        
         edit_trackers = {}
 
-        for tab, mask, key in zip(tabs, [~df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), df['STATUS'].str.contains(statusy_wyjazdowe, na=False, case=False), None], ["in", "out", "full"]):
+        for tab, mask, key in zip(tabs, masks, keys):
             with tab:
                 c1, c2, c3 = st.columns([1.5, 2, 1])
                 with c1:
@@ -209,6 +224,7 @@ if check_password():
                     for r_idx_str, col_ch in changes.items():
                         real_idx = s_df.index[int(r_idx_str)]
                         for col, val in col_ch.items(): final_df.at[real_idx, col] = val
+                
                 if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
                 conn.update(spreadsheet=URL, data=final_df)
                 st.cache_data.clear()
