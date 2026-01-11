@@ -28,7 +28,7 @@ def check_password():
     return True
 
 if check_password():
-    # --- 3. STYLE CSS ---
+    # --- 3. STYLE CSS (Twoje oryginalne) ---
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
@@ -55,10 +55,9 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
+        raw_df = conn.read(spreadsheet=URL, ttl="5s").dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
-        # Inicjalizacja kolumn bazowych oraz nowej kolumny notatki
         all_cols = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'Nr Proj.', 'Nazwa Projektu', 'STATUS', 'spis casów', 'zdjęcie po załadunku', 'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA', 'NOTATKA DODATKOWA']
         for col in all_cols:
             if col not in df.columns: df[col] = ""
@@ -67,7 +66,7 @@ if check_password():
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
-        # --- 5. SIDEBAR ---
+        # --- 5. SIDEBAR (Oryginalne filtry) ---
         with st.sidebar:
             st.header("⚙️ Ustawienia")
             view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
@@ -82,32 +81,24 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracje kolumn edytora
+        # Konfiguracje edytora (Oryginalne linki)
         column_cfg_main = {
-            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY", "⚪ status-planned"], width="medium"),
+            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY"], width="medium"),
             "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Foto", display_text="Otwórz"),
-            "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.TextColumn("📝 NOTATKA"),
-            "NOTATKA DODATKOWA": st.column_config.TextColumn("📝 DODATKOWA")
-        }
-        
-        column_cfg_slots = {
-            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "ZAŁADOWANY NA POWRÓT"], width="medium"),
-            "Hala": st.column_config.SelectboxColumn("Hala", options=["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"]),
-            "NOTATKA DODATKOWA": st.column_config.TextColumn("📝 NOTATKA DODATKOWA", width="large")
+            "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small")
         }
 
-        # Funkcja renderowania kafelków
+        # --- 6. FUNKCJA KAFELKÓW (Pełna wersja z Twojego kodu) ---
         def render_grouped_tiles(dataframe):
             dff = dataframe.copy()
             if view_mode == "Kafelkowy":
                 if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
                 if f_status: dff = dff[dff['STATUS'].isin(f_status)]
-                if f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
+                if 'f_carrier' in locals() and f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
 
             if dff.empty:
                 st.info("Brak danych.")
@@ -115,7 +106,8 @@ if check_password():
             
             for truck in dff['Auto'].unique():
                 truck_data = dff[dff['Auto'] == truck]
-                st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {truck_data.iloc[0]["Przewoźnik"]}</span></div>', unsafe_allow_html=True)
+                carrier = truck_data.iloc[0]['Przewoźnik']
+                st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {carrier}</span></div>', unsafe_allow_html=True)
                 t_cols = st.columns(3)
                 for idx, (_, row) in enumerate(truck_data.iterrows()):
                     with t_cols[idx % 3]:
@@ -143,19 +135,13 @@ if check_password():
                         with b2:
                             if row['zdjęcie po załadunku']: st.link_button("📸 Foto", row['zdjęcie po załadunku'], use_container_width=True)
                             if row['zrzut z currenta']: st.link_button("🖼️ Current", row['zrzut z currenta'], use_container_width=True)
-                        with st.expander("📝 Notatka"):
-                            st.write(row['NOTATKA'])
-                            if row['NOTATKA DODATKOWA']: st.warning(f"Dodatkowa: {row['NOTATKA DODATKOWA']}")
+                        with st.expander("📝 Notatki"):
+                            st.write(f"Główna: {row['NOTATKA']}")
+                            if row['NOTATKA DODATKOWA']: st.info(f"Dodatkowa: {row['NOTATKA DODATKOWA']}")
                 st.markdown('<hr class="truck-line">', unsafe_allow_html=True)
 
-        # --- 6. METRYKI ---
-        st.title("🏗️ SQM Control Tower")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
-        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
-        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
-
         # --- 7. ZAKŁADKI ---
+        st.title("🏗️ SQM Control Tower")
         tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "⏰ SLOTY NA EMPTIES", "📚 BAZA"])
         
         statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
@@ -168,73 +154,66 @@ if check_password():
 
         for tab, key in zip(tabs, ["in", "out", "empty", "slots", "full"]):
             with tab:
+                # NOWA ZAKŁADKA: SLOTY NA EMPTIES
                 if key == "slots":
-                    st.subheader("Planowanie nowych operacji na puste skrzynie")
-                    with st.expander("➕ DODAJ NOWY SLOT NA EMPTIES", expanded=True):
+                    st.subheader("Planowanie operacji Empties")
+                    with st.form("new_slot_form", clear_on_submit=True):
                         c1, c2, c3 = st.columns(3)
                         with c1:
-                            new_date = st.date_input("Data", datetime.now(), key="ns_d")
-                            new_hala = st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
-                            new_slot = st.text_input("Numer Slotu", key="ns_nr")
+                            ns_date = st.date_input("Data", datetime.now())
+                            ns_hala = st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
+                            ns_slot = st.text_input("Numer Slotu")
                         with c2:
-                            new_time = st.text_input("Godzina", key="ns_t")
-                            sel_carrier = st.selectbox("Przewoźnik (z zakładki Puste)", [""] + unique_carriers_data['Przewoźnik'].tolist())
-                            sel_status = st.selectbox("Status", statusy_operacyjne)
+                            ns_time = st.text_input("Godzina")
+                            ns_carrier = st.selectbox("Przewoźnik (z zakładki Puste)", [""] + unique_carriers_data['Przewoźnik'].tolist())
+                            ns_status = st.selectbox("Status", statusy_operacyjne)
                         with c3:
-                            new_note = st.text_area("Notatka dodatkowa", key="ns_note")
-                            if st.button("DODAJ SLOT DO PLANU"):
-                                if sel_carrier:
-                                    info = unique_carriers_data[unique_carriers_data['Przewoźnik'] == sel_carrier].iloc[0]
+                            ns_note = st.text_area("Notatka dodatkowa")
+                            if st.form_submit_button("➕ DODAJ SLOT"):
+                                if ns_carrier:
+                                    info = unique_carriers_data[unique_carriers_data['Przewoźnik'] == ns_carrier].iloc[0]
                                     new_row = pd.DataFrame([{
-                                        'Data': str(new_date), 'Nr Slotu': new_slot, 'Godzina': new_time, 'Hala': new_hala,
-                                        'Przewoźnik': sel_carrier, 'Auto': info['Auto'], 'Kierowca': info['Kierowca'],
-                                        'STATUS': sel_status, 'Nazwa Projektu': '--- OPERACJA EMPTIES ---', 'NOTATKA DODATKOWA': new_note
+                                        'Data': str(ns_date), 'Nr Slotu': ns_slot, 'Godzina': ns_time, 'Hala': ns_hala,
+                                        'Przewoźnik': ns_carrier, 'Auto': info['Auto'], 'Kierowca': info['Kierowca'],
+                                        'STATUS': ns_status, 'Nazwa Projektu': '--- OPERACJA EMPTIES ---', 'NOTATKA DODATKOWA': ns_note
                                     }])
-                                    final_df = pd.concat([df, new_row], ignore_index=True)
-                                    conn.update(spreadsheet=URL, data=final_df)
+                                    conn.update(spreadsheet=URL, data=pd.concat([df, new_row], ignore_index=True))
                                     st.cache_data.clear()
-                                    st.success("Dodano!")
                                     st.rerun()
                                 else: st.error("Wybierz przewoźnika!")
-                    
+
                     st.divider()
                     df_s = df[df['STATUS'].isin(statusy_operacyjne)].copy()
                     if not df_s.empty:
-                        ed_s = st.data_editor(df_s[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA DODATKOWA']], use_container_width=True, key="ed_slots", column_config=column_cfg_slots, hide_index=True)
+                        ed_s = st.data_editor(df_s[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA DODATKOWA']], use_container_width=True, key="ed_slots", hide_index=True)
                         edit_trackers["ed_slots"] = (df_s, ed_s)
-                    else: st.info("Brak zaplanowanych operacji.")
 
+                # PUSTE TRUCKI
                 elif key == "empty":
                     df_p = df[df['STATUS'].str.contains(statusy_puste, na=False, case=False)].copy()
                     if not df_p.empty:
                         df_p_g = df_p.groupby('Auto').agg({'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'first'}).reset_index()
                         ed_e = st.data_editor(df_p_g[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']], use_container_width=True, key="ed_empty", hide_index=True)
                         edit_trackers["ed_empty"] = (df_p_g, ed_e)
-                    else: st.info("Brak pustych aut.")
 
+                # POZOSTAŁE (MONTAŻE, ROZŁADOWANE, BAZA)
                 else:
-                    c1, c2, c3 = st.columns([1.5, 2, 1])
+                    c1, c2 = st.columns([1, 2])
                     with c1:
                         if key == "in":
                             d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
                             all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
                     with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
-                    with c3:
-                        st.write("###")
-                        if st.button("🔄 Odśwież", key=f"r_{key}"):
-                            st.cache_data.clear()
-                            st.rerun()
 
+                    mask = None
                     if key == "in":
                         mask = (~df['STATUS'].str.contains(statusy_rozladowane, na=False)) & (~df['STATUS'].str.contains(statusy_puste, na=False)) & (~df['STATUS'].isin(statusy_operacyjne))
                     elif key == "out":
                         mask = df['STATUS'].str.contains(statusy_rozladowane, na=False)
-                    else: mask = None
-
+                    
                     df_v = df[mask].copy() if mask is not None else df.copy()
                     if key == "in" and not all_d:
-                        df_v['Dt'] = pd.to_datetime(df_v['Data'], errors='coerce')
-                        df_v = df_v[df_v['Dt'].dt.date == d_val].drop(columns=['Dt'])
+                        df_v = df_v[pd.to_datetime(df_v['Data'], errors='coerce').dt.date == d_val]
                     if search:
                         df_v = df_v[df_v.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
@@ -243,30 +222,26 @@ if check_password():
                         edit_trackers[f"ed_{key}"] = (df_v, ed)
                         sel = ed[ed["PODGLĄD"] == True]
                         if not sel.empty:
-                            row = sel.iloc[-1]
-                            st.info(f"**[{row['Nr Proj.']}] {row['Nazwa Projektu']}**\n\n{row['NOTATKA']}\n{row['NOTATKA DODATKOWA']}")
+                            r = sel.iloc[-1]
+                            st.info(f"**[{r['Nr Proj.']}] {r['Nazwa Projektu']}**\n\n{r['NOTATKA']}\n\n*Dodatkowa:* {r['NOTATKA DODATKOWA']}")
                     else:
                         render_grouped_tiles(df_v)
 
-        # --- 8. ZAPIS ---
-        if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
+        # --- 8. ZAPIS GLOBALNY ---
+        st.divider()
+        if st.button("💾 ZAPISZ ZMIANY W TABELACH", type="primary", use_container_width=True):
             final_df = df.copy()
-            for k, (s_df, e_df) in edit_trackers.items():
+            for k, (orig_df, edited_df) in edit_trackers.items():
                 changes = st.session_state[k].get("edited_rows", {})
-                if k == "ed_empty":
-                    for r_idx, col_ch in changes.items():
-                        if "STATUS" in col_ch:
-                            t_id = s_df.iloc[int(r_idx)]['Auto']
-                            final_df.loc[final_df['Auto'] == t_id, 'STATUS'] = col_ch["STATUS"]
-                else:
-                    for r_idx, col_ch in changes.items():
-                        real_idx = s_df.index[int(r_idx)]
+                for r_idx, col_ch in changes.items():
+                    real_idx = orig_df.index[int(r_idx)]
+                    if k == "ed_empty" and "STATUS" in col_ch:
+                        final_df.loc[final_df['Auto'] == orig_df.iloc[int(r_idx)]['Auto'], 'STATUS'] = col_ch["STATUS"]
+                    else:
                         for col, val in col_ch.items(): final_df.at[real_idx, col] = val
             
-            if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
-            conn.update(spreadsheet=URL, data=final_df)
+            conn.update(spreadsheet=URL, data=final_df.drop(columns=["PODGLĄD"]) if "PODGLĄD" in final_df.columns else final_df)
             st.cache_data.clear()
-            st.success("Zapisano!")
             st.rerun()
 
     except Exception as e:
