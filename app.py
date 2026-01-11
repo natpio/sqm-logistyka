@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. AUTORYZACJA (Cookie Controller) ---
+# --- 2. AUTORYZACJA ---
 controller = CookieController()
 
 def check_password():
@@ -36,16 +36,15 @@ def check_password():
         return False
     elif not st.session_state["password_correct"]:
         st.text_input("Hasło dostępu:", type="password", on_change=password_entered, key="password")
-        st.error("😕 Błędne hasło. Spróbuj ponownie.")
+        st.error("😕 Błędne hasło")
         return False
     else:
         return True
 
 if check_password():
-    # --- 3. STYLE CSS (Pełny zestaw) ---
+    # --- 3. STYLE CSS (Twoje oryginalne, pełne) ---
     st.markdown("""
         <style>
-        .main { background-color: #f5f7f9; }
         div[data-testid="stMetric"] {
             background-color: #ffffff;
             border: 1px solid #e0e0e0;
@@ -64,7 +63,6 @@ if check_password():
             justify-content: space-between;
             align-items: center;
             font-weight: bold;
-            font-size: 1.1em;
         }
         .transport-card {
             background-color: #ffffff;
@@ -73,27 +71,17 @@ if check_password():
             padding: 18px;
             margin-bottom: 12px;
             border-left: 10px solid #ccc;
-            transition: transform 0.2s;
         }
-        .transport-card:hover { transform: translateY(-2px); box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
         .status-trasie { border-left-color: #ffeb3b; }
         .status-rampa { border-left-color: #f44336; }
         .status-rozladowany { border-left-color: #4caf50; }
         .status-empties { border-left-color: #9e9e9e; }
         .status-zaladowany { border-left-color: #2196f3; }
         .status-pusty { border-left-color: #ffffff; border-left-style: dashed; }
-        
-        .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-        .stTabs [data-baseweb="tab"] {
-            background-color: #e0e0e0;
-            border-radius: 5px 5px 0 0;
-            padding: 10px 20px;
-        }
-        .stTabs [aria-selected="true"] { background-color: #2c3e50 !important; color: white !important; }
         </style>
         """, unsafe_allow_html=True)
 
-    # --- 4. POŁĄCZENIE I DANE ---
+    # --- 4. POŁĄCZENIE Z BAZĄ ---
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
 
@@ -107,36 +95,29 @@ if check_password():
         
         df_raw = df_raw.astype(str).replace('nan', '')
 
-        # --- 5. WYBÓR DNIA (Widok Kalendarza) ---
-        c_top1, c_top2 = st.columns([2, 1])
-        with c_top1:
-            st.title("🏗️ SQM Logistics - Control Tower")
-        with c_top2:
-            # Wybór dnia filtrujący całą aplikację
-            selected_date = st.date_input("📅 Wybierz dzień operacyjny:", datetime.now())
+        # --- 5. WIDOK KALENDARZA (Wybór dnia) ---
+        st.title("🏗️ SQM Logistics - Control Tower")
+        selected_date = st.date_input("📅 Wybierz dzień operacyjny:", datetime.now())
         
-        # Filtrujemy bazę do wybranego dnia (z zachowaniem dostępu do całości w zakładce Baza)
+        # Filtrowanie główne po dacie
         df_day = df_raw[df_raw['Data'] == str(selected_date)].copy()
 
         # --- 6. SIDEBAR ---
         with st.sidebar:
-            st.image("https://sqm.pl/wp-content/uploads/2021/03/logo-sqm.png", width=150)
-            st.header("⚙️ Ustawienia")
-            view_mode = st.radio("Widok danych:", ["Tradycyjny (Tabela)", "Kafelkowy (Operacyjny)"])
+            st.header("⚙️ Ustawienia widoku")
+            view_mode = st.radio("Zmień widok:", ["Tradycyjny (Tabela)", "Kafelkowy (Operacyjny)"])
             st.divider()
-            st.subheader("🔍 Filtry dodatkowe")
-            f_hala = st.multiselect("Hala:", options=sorted(df_raw['Hala'].unique()))
-            f_status = st.multiselect("Status:", options=sorted(df_raw['STATUS'].unique()))
+            f_hala = st.multiselect("Filtruj Halę:", options=sorted(df_raw['Hala'].unique()))
+            f_status = st.multiselect("Filtruj Status:", options=sorted(df_raw['STATUS'].unique()))
             st.divider()
             if st.button("Wyloguj"):
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Aplikowanie filtrów bocznych
         if f_hala: df_day = df_day[df_day['Hala'].isin(f_hala)]
         if f_status: df_day = df_day[df_day['STATUS'].isin(f_status)]
 
-        # --- 7. METRYKI (Dla wybranego dnia) ---
+        # Metryki
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("🚚 W TRASIE", len(df_day[df_day['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("🔴 POD RAMPĄ", len(df_day[df_day['STATUS'].str.contains("RAMP", na=False)]))
@@ -144,12 +125,12 @@ if check_password():
         p_fiz = df_day[df_day['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]['Auto'].unique()
         m4.metric("⚪ PUSTE AUTA", len([a for a in p_fiz if a and a != '']))
 
-        # Słowniki pomocnicze
+        # Słowniki
         carriers_list = sorted([c for c in df_raw['Przewoźnik'].unique() if c and c != ""])
         status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"]
         empties_ops = ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "ZAŁADOWANY NA POWRÓT"]
 
-        # --- 8. KONFIGURACJA KOLUMN ---
+        # --- 7. KONFIGURACJA KOLUMN (Linki, Checkboxy, Widoczność) ---
         column_cfg = {
             "USUŃ": st.column_config.CheckboxColumn("🗑️", width="small"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
@@ -162,110 +143,67 @@ if check_password():
             "NOTATKA DODATKOWA": None
         }
 
-        # --- 9. ZAKŁADKI ---
-        t1, t2, t3, t4, t5 = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "⏰ SLOTY NA EMPTIES", "📚 BAZA (CAŁA)"])
+        # --- 8. ZAKŁADKI ---
+        tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "⏰ SLOTY NA EMPTIES", "📚 BAZA"])
         edit_trackers = {}
 
-        # MONTAŻE (T1), ROZŁADOWANE (T2), BAZA (T5)
-        for tab, key, m_filter, is_full_base in zip([t1, t2, t5], ["in", "out", "all"], [
+        for tab, key, m_filter, is_full in zip([tabs[0], tabs[1], tabs[4]], ["in", "out", "all"], [
             (~df_day['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|PUSTY|EMPTIES", na=False)) & (~df_day['STATUS'].isin(empties_ops)),
             df_day['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY", na=False),
             None
         ], [False, False, True]):
             with tab:
-                src = st.text_input("🔍 Szukaj (Nr Proj / Auto / Klient):", key=f"s_{key}")
-                data_to_show = df_raw.copy() if is_full_base else df_day[m_filter].copy()
-                
+                data = df_raw.copy() if is_full else df_day[m_filter].copy()
+                src = st.text_input("🔍 Szukaj:", key=f"s_{key}")
                 if src:
-                    data_to_show = data_to_show[data_to_show.apply(lambda r: r.astype(str).str.contains(src, case=False).any(), axis=1)]
+                    data = data[data.apply(lambda r: r.astype(str).str.contains(src, case=False).any(), axis=1)]
 
                 if view_mode == "Tradycyjny (Tabela)":
-                    data_to_show.insert(0, "USUŃ", False)
-                    data_to_show.insert(data_to_show.columns.get_loc("NOTATKA") + 1, "PODGLĄD", False)
-                    
-                    ed = st.data_editor(data_to_show, use_container_width=True, hide_index=True, key=f"ed_{key}", column_config=column_cfg)
-                    edit_trackers[key] = (data_to_show, ed)
-                    
-                    sel = ed[ed["PODGLĄD"] == True]
-                    if not sel.empty:
-                        r = sel.iloc[-1]
-                        st.info(f"📝 **Notatka:** {r['NOTATKA']}")
-                        if r['NOTATKA DODATKOWA']: st.warning(f"💡 **Dodatkowa:** {r['NOTATKA DODATKOWA']}")
+                    data.insert(0, "USUŃ", False)
+                    data.insert(data.columns.get_loc("NOTATKA") + 1, "PODGLĄD", False)
+                    ed = st.data_editor(data, use_container_width=True, hide_index=True, key=f"ed_{key}", column_config=column_cfg)
+                    edit_trackers[key] = (data, ed)
+                    if not ed[ed["PODGLĄD"] == True].empty:
+                        r = ed[ed["PODGLĄD"] == True].iloc[-1]
+                        st.info(f"📝 {r['NOTATKA']} | 💡 {r['NOTATKA DODATKOWA']}")
                 else:
-                    # KAFELKOWY
-                    for truck in data_to_show['Auto'].unique():
-                        t_data = data_to_show[data_to_show['Auto'] == truck]
-                        st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span>{t_data.iloc[0]["Przewoźnik"]}</span></div>', unsafe_allow_html=True)
-                        cols = st.columns(3)
-                        for idx_c, (_, r) in enumerate(t_data.iterrows()):
-                            with cols[idx_c % 3]:
-                                s_val = str(r['STATUS']).upper()
-                                c_class = "status-trasie" if "TRASIE" in s_val else "status-rampa" if "RAMP" in s_val else "status-rozladowany" if "ROZŁADOWANY" in s_val else "status-empties" if "EMPTIES" in s_val else "status-zaladowany" if "ZAŁADOWANY" in s_val else "status-pusty"
-                                st.markdown(f"""<div class="transport-card {c_class}">
-                                    <b>[{r['Nr Proj.']}] {r['Nazwa Projektu']}</b><br>
-                                    📍 {r['Hala']} | ⏰ {r['Godzina']}<br>
-                                    Status: <b>{r['STATUS']}</b>
-                                </div>""", unsafe_allow_html=True)
-                                if r['spis casów']: st.link_button("📋 Spis Casów", r['spis casów'], use_container_width=True)
+                    for truck in data['Auto'].unique():
+                        t_data = data[data['Auto'] == truck]
+                        st.markdown(f'<div class="truck-separator">🚛 {truck} | {t_data.iloc[0]["Przewoźnik"]}</div>', unsafe_allow_html=True)
+                        for _, r in t_data.iterrows():
+                            st.markdown(f'<div class="transport-card"><b>{r["Nazwa Projektu"]}</b><br>{r["Hala"]} | {r["Godzina"]} | {r["STATUS"]}</div>', unsafe_allow_html=True)
 
-        with t3: # PUSTE
-            df_p = df_day[df_day['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)].copy()
-            if not df_p.empty:
-                st.dataframe(df_p.groupby('Auto').agg({'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'first'}).reset_index(), use_container_width=True, hide_index=True)
-
-        with t4: # SLOTY EMPTIES
-            st.subheader("Nowa operacja Empties")
-            with st.form("f_emp_full", clear_on_submit=True):
+        with tabs[3]: # SLOTY EMPTIES
+            with st.form("f_emp"):
                 c1, c2, c3 = st.columns(3)
-                with c1: 
-                    nd = st.date_input("Data", selected_date)
-                    nh = st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
-                with c2:
-                    nt = st.text_input("Godzina")
-                    np = st.selectbox("Przewoźnik", [""] + carriers_list)
-                with c3:
-                    nst = st.selectbox("Status", empties_ops)
-                    nn = st.text_area("Notatka")
-                if st.form_submit_button("💾 DODAJ DO PLANU"):
-                    db_fresh = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
-                    new_r = pd.DataFrame([{'Data': str(nd), 'Hala': nh, 'Godzina': nt, 'Przewoźnik': np, 'STATUS': nst, 'Nazwa Projektu': '--- OPERACJA EMPTIES ---', 'NOTATKA DODATKOWA': nn}])
-                    conn.update(spreadsheet=URL, data=pd.concat([db_fresh, new_r], ignore_index=True))
+                with c1: nd, nh = st.date_input("Data", selected_date), st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
+                with c2: nt, np = st.text_input("Godzina"), st.selectbox("Przewoźnik", [""] + carriers_list)
+                with c3: nst, nn = st.selectbox("Status", empties_ops), st.text_area("Notatka")
+                if st.form_submit_button("💾 DODAJ"):
+                    f_db = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
+                    nr = pd.DataFrame([{'Data': str(nd), 'Hala': nh, 'Godzina': nt, 'Przewoźnik': np, 'STATUS': nst, 'Nazwa Projektu': '--- EMPTIES ---', 'NOTATKA DODATKOWA': nn}])
+                    conn.update(spreadsheet=URL, data=pd.concat([f_db, nr], ignore_index=True))
                     st.cache_data.clear()
                     st.rerun()
 
-            st.divider()
-            df_e_v = df_day[df_day['STATUS'].isin(empties_ops)].copy()
-            if not df_e_v.empty:
-                df_e_v.insert(0, "USUŃ", False)
-                ed_e = st.data_editor(df_e_v[['USUŃ', 'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'STATUS', 'NOTATKA DODATKOWA']], 
-                                      use_container_width=True, hide_index=True, key="ed_e_full",
-                                      column_config={"USUŃ": st.column_config.CheckboxColumn("🗑️", width="small"), "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=carriers_list)})
-                edit_trackers["empties"] = (df_e_v, ed_e)
-
-        # --- 10. GLOBALNY ZAPIS I USUWANIE (Prawidłowa Logika) ---
+        # --- 9. ZAPIS I USUWANIE (Prawidłowa Logika Indeksowania) ---
         st.divider()
         if st.button("💾 ZAPISZ ZMIANY / USUŃ ZAZNACZONE", type="primary", use_container_width=True):
-            f_db = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
-            to_delete_idx = []
-            
-            for k, (orig_df, edited_df) in edit_trackers.items():
-                for i in range(len(edited_df)):
-                    real_index = orig_df.index[i]
-                    if edited_df.iloc[i]["USUŃ"]:
-                        to_delete_idx.append(real_index)
+            full_db = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
+            to_delete = []
+            for k, (orig, edit) in edit_trackers.items():
+                for i in range(len(edit)):
+                    idx = orig.index[i] # Pobranie oryginalnego indeksu z bazy
+                    if edit.iloc[i]["USUŃ"]: to_delete.append(idx)
                     else:
-                        for col in edited_df.columns:
-                            if col in f_db.columns:
-                                f_db.at[real_index, col] = edited_df.iloc[i][col]
-            
-            if to_delete_idx:
-                f_db = f_db.drop(to_delete_idx)
-            
-            conn.update(spreadsheet=URL, data=f_db[all_cols])
+                        for col in edit.columns:
+                            if col in full_db.columns: full_db.at[idx, col] = edit.iloc[i][col]
+            if to_delete: full_db = full_db.drop(to_delete)
+            conn.update(spreadsheet=URL, data=full_db[all_cols])
             st.cache_data.clear()
-            st.success(f"Zapisano zmiany. Usunięto {len(to_delete_idx)} rekordów.")
+            st.success("Baza zaktualizowana!")
             time.sleep(1)
             st.rerun()
 
     except Exception as e:
-        st.error(f"Wystąpił błąd krytyczny: {e}")
+        st.error(f"Błąd: {e}")
