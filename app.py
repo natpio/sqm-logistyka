@@ -98,8 +98,8 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracja dla edytora
-        column_cfg = {
+        # Konfiguracje dla edytora
+        column_cfg_main = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY", "⚪ status-planned"], width="medium"),
             "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
@@ -110,11 +110,17 @@ if check_password():
             "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
         }
 
+        # Konfiguracja specyficzna dla Pustych Trucków (Tylko 4 kolumny)
+        column_cfg_puste = {
+            "STATUS": st.column_config.SelectboxColumn("STATUS (Zmień dla całego auta)", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY"], width="large")
+        }
+
         def render_grouped_tiles(dataframe):
             dff = dataframe.copy()
-            if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
-            if f_status: dff = dff[dff['STATUS'].isin(f_status)]
-            if f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
+            if view_mode == "Kafelkowy": # Filtry sidebar działają tylko w kafelkach
+                if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
+                if f_status: dff = dff[dff['STATUS'].isin(f_status)]
+                if f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
 
             if dff.empty:
                 st.info("Brak danych dla wybranych filtrów.")
@@ -148,11 +154,11 @@ if check_password():
                         
                         b1, b2 = st.columns(2)
                         with b1:
-                            if row['spis casów']: st.link_button("📋 Spis", row['spis casów'], use_container_width=True)
-                            if row['SLOT']: st.link_button("⏰ Slot", row['SLOT'], use_container_width=True)
+                            if row['spis casów'] and row['spis casów'] != "": st.link_button("📋 Spis", row['spis casów'], use_container_width=True)
+                            if row['SLOT'] and row['SLOT'] != "": st.link_button("⏰ Slot", row['SLOT'], use_container_width=True)
                         with b2:
-                            if row['zdjęcie po załadunku']: st.link_button("📸 Foto", row['zdjęcie po załadunku'], use_container_width=True)
-                            if row['zrzut z currenta']: st.link_button("🖼️ Current", row['zrzut z currenta'], use_container_width=True)
+                            if row['zdjęcie po załadunku'] and row['zdjęcie po załadunku'] != "": st.link_button("📸 Foto", row['zdjęcie po załadunku'], use_container_width=True)
+                            if row['zrzut z currenta'] and row['zrzut z currenta'] != "": st.link_button("🖼️ Current", row['zrzut z currenta'], use_container_width=True)
                         
                         with st.expander("📝 Notatka"):
                             st.write(row['NOTATKA'] if row['NOTATKA'] else "Brak")
@@ -165,71 +171,103 @@ if check_password():
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        # LOGIKA ZAKŁADEK (Zmieniona zgodnie z prośbą o EMPTIES)
+        # DEFINICJA ZAKŁADEK
         tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📚 BAZA"])
         
-        statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY" # Usunięto EMPTIES stąd
-        statusy_puste = "PUSTY|EMPTIES" # EMPTIES wpada tutaj
+        statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
+        statusy_puste = "PUSTY|EMPTIES"
 
-        # Montaże: wszystko co nie jest rozładowane/załadowane i nie jest puste/empties
-        mask_montaze = (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & (~df['STATUS'].str.contains(statusy_puste, na=False, case=False))
-        # Rozładowane: tylko ROZŁADOWANY i ZAŁADOWANY
-        mask_rozladowane = df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)
-        # Puste Trucki: PUSTY oraz EMPTIES
-        mask_puste = df['STATUS'].str.contains(statusy_puste, na=False, case=False)
-
-        masks = [mask_montaze, mask_rozladowane, mask_puste, None]
-        keys = ["in", "out", "empty", "full"]
-        
         edit_trackers = {}
 
-        for tab, mask, key in zip(tabs, masks, keys):
+        for i, (tab, key) in enumerate(zip(tabs, ["in", "out", "empty", "full"])):
             with tab:
-                c1, c2, c3 = st.columns([1.5, 2, 1])
-                with c1:
-                    if key == "in":
-                        d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
-                        all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
-                with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
-                with c3:
-                    st.write("###")
-                    if st.button("🔄 Odśwież", key=f"r_{key}"):
-                        st.cache_data.clear()
-                        st.rerun()
+                # 1. Filtrowanie bazowe dla zakładki
+                if key == "in":
+                    mask = (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & (~df['STATUS'].str.contains(statusy_puste, na=False, case=False))
+                elif key == "out":
+                    mask = df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)
+                elif key == "empty":
+                    mask = df['STATUS'].str.contains(statusy_puste, na=False, case=False)
+                else: mask = None
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
-                if key == "in" and not all_d:
-                    df_view['Data_dt'] = pd.to_datetime(df_view['Data'], errors='coerce')
-                    df_view = df_view[df_view['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
-                if search:
-                    df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
-                if view_mode == "Tradycyjny":
-                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg)
-                    edit_trackers[f"ed_{key}"] = (df_view, ed)
-                    sel = ed[ed["PODGLĄD"] == True]
-                    if not sel.empty:
-                        row = sel.iloc[-1]
-                        st.info(f"**[{row['Nr Proj.']}] {row['Nazwa Projektu']}**\n\n{row['NOTATKA']}")
+                # 2. Specyficzny interfejs dla PUSTE TRUCKI
+                if key == "empty":
+                    if not df_view.empty:
+                        # Grupowanie po Auto, aby uniknąć powtórzeń (zrzut ekranu)
+                        df_empty_grouped = df_view.groupby('Auto').agg({
+                            'Przewoźnik': 'first',
+                            'Kierowca': 'first',
+                            'STATUS': 'first'
+                        }).reset_index()
+                        
+                        st.info("Poniżej lista unikalnych pojazdów o statusie PUSTY lub EMPTIES.")
+                        ed_p = st.data_editor(
+                            df_empty_grouped[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']], 
+                            use_container_width=True, 
+                            key="ed_empty",
+                            column_config=column_cfg_puste,
+                            hide_index=True
+                        )
+                        edit_trackers["ed_empty"] = (df_empty_grouped, ed_p)
+                    else:
+                        st.info("Obecnie brak pojazdów w statusie Pusty/Empties.")
+
+                # 3. Standardowe interfejsy dla pozostałych
                 else:
-                    render_grouped_tiles(df_view)
+                    c1, c2, c3 = st.columns([1.5, 2, 1])
+                    with c1:
+                        if key == "in":
+                            d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
+                            all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
+                    with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
+                    with c3:
+                        st.write("###")
+                        if st.button("🔄 Odśwież", key=f"r_{key}"):
+                            st.cache_data.clear()
+                            st.rerun()
 
-        if view_mode == "Tradycyjny":
+                    if key == "in" and not all_d:
+                        df_view['Data_dt'] = pd.to_datetime(df_view['Data'], errors='coerce')
+                        df_view = df_view[df_view['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
+                    if search:
+                        df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+
+                    if view_mode == "Tradycyjny":
+                        ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg_main)
+                        edit_trackers[f"ed_{key}"] = (df_view, ed)
+                        sel = ed[ed["PODGLĄD"] == True]
+                        if not sel.empty:
+                            row = sel.iloc[-1]
+                            st.info(f"**[{row['Nr Proj.']}] {row['Nazwa Projektu']}**\n\n{row['NOTATKA']}")
+                    else:
+                        render_grouped_tiles(df_view)
+
+        # --- 7. GLOBALNY ZAPIS ZMIAN ---
+        if view_mode == "Tradycyjny" or "ed_empty" in edit_trackers:
             st.divider()
             if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
-                for k in edit_trackers:
-                    s_df, e_df = edit_trackers[k]
+                for k, (orig_df_part, ed_df) in edit_trackers.items():
                     changes = st.session_state[k].get("edited_rows", {})
-                    for r_idx_str, col_ch in changes.items():
-                        real_idx = s_df.index[int(r_idx_str)]
-                        for col, val in col_ch.items(): final_df.at[real_idx, col] = val
+                    
+                    if k == "ed_empty": # Logika masowej zmiany statusu dla Auta
+                        for r_idx_str, col_ch in changes.items():
+                            if "STATUS" in col_ch:
+                                truck_id = orig_df_part.iloc[int(r_idx_str)]['Auto']
+                                final_df.loc[final_df['Auto'] == truck_id, 'STATUS'] = col_ch["STATUS"]
+                    else: # Standardowa logika zapisu
+                        for r_idx_str, col_ch in changes.items():
+                            real_idx = orig_df_part.index[int(r_idx_str)]
+                            for col, val in col_ch.items():
+                                final_df.at[real_idx, col] = val
                 
                 if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
                 conn.update(spreadsheet=URL, data=final_df)
                 st.cache_data.clear()
-                st.success("Zapisano!")
+                st.success("Wszystkie zmiany zostały zapisane w Google Sheets!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Wystąpił błąd podczas ładowania danych: {e}")
