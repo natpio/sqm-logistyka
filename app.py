@@ -148,9 +148,9 @@ if check_password():
                 if key == "empties_slots":
                     st.subheader("Zarządzanie Slotami na Empties")
                     
-                    # Tabela z możliwością usuwania wierszy (num_rows="dynamic")
+                    # Tabela z linkiem SLOT i Notatką
                     ed_es = st.data_editor(
-                        df_view[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA']], 
+                        df_view[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'SLOT', 'STATUS', 'NOTATKA']], 
                         use_container_width=True,
                         column_config=column_cfg_main,
                         key="ed_empties_slots",
@@ -172,9 +172,12 @@ if check_password():
                         f_time = c3.text_input("Godzina")
                         f_hala = c4.selectbox("Hala", hala_options)
                         
-                        c5, c6 = st.columns(2)
+                        c5, c6, c7 = st.columns([2, 2, 2])
                         f_carrier = c5.selectbox("Przewoźnik (z listy EMPTIES)", options=available_carriers)
                         f_status = c6.selectbox("Status", ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK"])
+                        f_pdf = c7.text_input("Link do SLOTU (PDF)")
+                        
+                        f_note = st.text_area("Notatka")
                         
                         if st.form_submit_button("DODAJ SLOT"):
                             new_row = {col: "" for col in df.columns}
@@ -187,14 +190,14 @@ if check_password():
                             new_row.update({
                                 "Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time,
                                 "Hala": f_hala, "Przewoźnik": carrier_val, "Auto": auto_val,
-                                "Kierowca": driver_val, "STATUS": f_status
+                                "Kierowca": driver_val, "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note
                             })
                             
                             updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                             if "PODGLĄD" in updated_df.columns: updated_df = updated_df.drop(columns=["PODGLĄD"])
                             conn.update(spreadsheet=URL, data=updated_df)
                             st.cache_data.clear()
-                            st.success("Dodano pomyślnie!")
+                            st.success("Slot na Empties został dodany!")
                             st.rerun()
 
                 elif key == "empty":
@@ -235,17 +238,15 @@ if check_password():
 
         # --- 7. GLOBALNY ZAPIS ZMIAN ---
         st.divider()
-        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY (EDYCJA I USUWANIE)", type="primary", use_container_width=True):
+        if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
             for k, (orig_df_part, ed_df) in edit_trackers.items():
                 state = st.session_state[k]
-                # 1. Obsługa usuniętych wierszy
                 deleted_rows = state.get("deleted_rows", [])
                 if deleted_rows:
                     indices_to_drop = orig_df_part.index[deleted_rows]
                     final_df = final_df.drop(indices_to_drop)
                 
-                # 2. Obsługa edytowanych komórek
                 changes = state.get("edited_rows", {})
                 if k == "ed_empty":
                     for r_idx_str, col_ch in changes.items():
@@ -262,7 +263,7 @@ if check_password():
             if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zmiany (w tym usunięcia) zostały zapisane!")
+            st.success("Wszystkie dane zostały zaktualizowane!")
             st.rerun()
 
     except Exception as e:
