@@ -65,12 +65,15 @@ if check_password():
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
-        # --- METRYKI ---
+        # --- METRYKI (Poprawione liczenie fizycznych aut) ---
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("🚚 W TRASIE", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("🔴 POD RAMPĄ", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("🟢 ROZŁADOWANE", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
-        m4.metric("⚪ PUSTE", len(df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False)]))
+        
+        # LICZENIE UNIKALNYCH AUT PUSTYCH (FIZYCZNE POJAZDY)
+        puste_fizycznie = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]['Auto'].unique()
+        m4.metric("⚪ PUSTE AUTA", len(puste_fizycznie))
 
         # --- 5. SIDEBAR ---
         with st.sidebar:
@@ -87,7 +90,7 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracja linków i widoczności
+        # Konfiguracja kolumn (Ukrycie Notatki Dodatkowej w montażach)
         column_cfg_base = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY"], width="medium"),
             "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
@@ -96,7 +99,7 @@ if check_password():
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Foto", display_text="Otwórz"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA DODATKOWA": None # Domyślnie ukrywamy w tabelach montażowych
+            "NOTATKA DODATKOWA": None
         }
 
         # --- 6. FUNKCJA KAFELKÓW ---
@@ -133,7 +136,7 @@ if check_password():
         st_ops = ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "ZAŁADOWANY NA POWRÓT"]
         edit_trackers = {}
 
-        # Dane o przewoźnikach z "Pustych"
+        # Źródło dla przewoźników
         df_p_src = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]
         p_list = df_p_src.groupby('Przewoźnik').agg({'Auto': 'first', 'Kierowca': 'first'}).reset_index()
 
@@ -142,12 +145,16 @@ if check_password():
             with st.form("f_emp", clear_on_submit=True):
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    nd, nh, ns = st.date_input("Data", datetime.now()), st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"]), st.text_input("Slot")
+                    nd = st.date_input("Data", datetime.now())
+                    nh = st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
+                    ns = st.text_input("Slot")
                 with c2:
-                    nt, np, nst = st.text_input("Godzina"), st.selectbox("Przewoźnik", [""] + p_list['Przewoźnik'].tolist()), st.selectbox("Status", st_ops)
+                    nt = st.text_input("Godzina")
+                    np = st.selectbox("Przewoźnik", [""] + p_list['Przewoźnik'].tolist())
+                    nst = st.selectbox("Status", st_ops)
                 with c3:
                     nn = st.text_area("Notatka dodatkowa")
-                    if st.form_submit_button("💾 ZAPISZ SLOT"):
+                    if st.form_submit_button("💾 ZAPISZ NOWY SLOT"):
                         if np:
                             fresh = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
                             inf = p_list[p_list['Przewoźnik'] == np].iloc[0]
@@ -155,11 +162,10 @@ if check_password():
                             conn.update(spreadsheet=URL, data=pd.concat([fresh, new_r], ignore_index=True))
                             st.cache_data.clear()
                             st.rerun()
-            
+
             st.divider()
             df_s_v = df[df['STATUS'].isin(st_ops)].copy()
             if not df_s_v.empty:
-                # W tej zakładce pokazujemy NOTATKĘ DODATKOWĄ zamiast zwykłej
                 ed_s = st.data_editor(df_s_v[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA DODATKOWA']], use_container_width=True, key="ed_s", hide_index=True)
                 edit_trackers["ed_s"] = (df_s_v, ed_s)
 
@@ -172,10 +178,11 @@ if check_password():
 
         for tab, key in zip([t1, t2, t5], ["in", "out", "all"]):
             with tab:
-                c1, c2 = st.columns([1, 2])
+                c1, c2 = st.columns([1.5, 2])
                 with c1:
                     if key == "in":
-                        d_v, a_d = st.date_input("Dzień:", datetime.now(), key="dv_in"), st.checkbox("Wszystkie", value=True, key="ad_in")
+                        d_v = st.date_input("Dzień:", datetime.now(), key="dv_in")
+                        a_d = st.checkbox("Wszystkie", value=True, key="ad_in")
                 with c2: src = st.text_input("🔍 Szukaj:", key=f"s_{key}")
 
                 if key == "in": m = (~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|PUSTY|EMPTIES", na=False)) & (~df['STATUS'].isin(st_ops))
@@ -187,13 +194,12 @@ if check_password():
                 if src: df_v = df_v[df_v.apply(lambda r: r.astype(str).str.contains(src, case=False).any(), axis=1)]
 
                 if view_mode == "Tradycyjny":
-                    # Tutaj NOTATKA DODATKOWA jest ukryta (column_cfg_base)
                     ed = st.data_editor(df_v, use_container_width=True, key=f"ed_{key}", column_config=column_cfg_base)
                     edit_trackers[f"ed_{key}"] = (df_v, ed)
                     sel = ed[ed["PODGLĄD"] == True]
                     if not sel.empty:
                         r = sel.iloc[-1]
-                        st.info(f"**Główna:** {r['NOTATKA']}")
+                        st.info(f"**Notatka:** {r['NOTATKA']}")
                         if r['NOTATKA DODATKOWA']: st.warning(f"**Dodatkowa:** {r['NOTATKA DODATKOWA']}")
                 else: render_grouped_tiles(df_v)
 
