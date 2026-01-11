@@ -81,38 +81,106 @@ if check_password():
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
-        # --- PRZYGOTOWANIE LISTY PRZEWOŹNIKÓW Z EMPTIES ---
+        # --- DANE POMOCNICZE DO LIST WYBORU ---
         statusy_puste = "PUSTY|EMPTIES"
         df_empties_source = df[df['STATUS'].str.contains(statusy_puste, na=False, case=False)]
         available_carriers = sorted(df_empties_source['Przewoźnik'].unique().tolist())
-        available_carriers_with_blank = ["", "--- BRAK ---"] + available_carriers
+        carriers_list = ["", "--- BRAK ---"] + available_carriers
 
         # --- 5. SIDEBAR ---
         with st.sidebar:
             st.header("⚙️ Ustawienia")
             view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
+            
+            if view_mode == "Kafelkowy":
+                st.divider()
+                st.subheader("🔍 Filtry Widoku")
+                f_hala = st.multiselect("Filtruj wg Hali:", options=sorted(df['Hala'].unique()))
+                f_status = st.multiselect("Filtruj wg Statusu:", options=sorted(df['STATUS'].unique()))
+                f_carrier = st.multiselect("Filtruj wg Przewoźnika:", options=sorted(df['Przewoźnik'].unique()))
+            
             st.divider()
             if st.button("Wyloguj"):
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracje dla edytora
+        # Konfiguracje kolumn
         status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY", "⚪ status-planned", "ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK"]
         hala_options = ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"]
         
         column_cfg_main = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options, width="medium"),
             "Hala": st.column_config.SelectboxColumn("Hala", options=hala_options),
-            "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=available_carriers_with_blank),
-            "Auto": st.column_config.TextColumn("Auto", disabled=True), # Zablokowane, bo zaczyta się samo
-            "Kierowca": st.column_config.TextColumn("Kierowca", disabled=True), # Zablokowane, bo zaczyta się samo
+            "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=carriers_list),
+            "Auto": st.column_config.TextColumn("Auto", disabled=True),
+            "Kierowca": st.column_config.TextColumn("Kierowca", disabled=True),
+            "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+            "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
+            "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+            "dodatkowe zdjęcie": st.column_config.LinkColumn("➕ Foto", display_text="Otwórz"),
+            "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
             "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
         }
 
-        # --- 6. NAGŁÓWEK ---
-        st.title("🏗️ SQM Control Tower")
+        # Funkcja kafelków
+        def render_grouped_tiles(dataframe):
+            dff = dataframe.copy()
+            if view_mode == "Kafelkowy":
+                if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
+                if f_status: dff = dff[dff['STATUS'].isin(f_status)]
+                if f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
 
+            if dff.empty:
+                st.info("Brak danych dla wybranych filtrów.")
+                return
+            
+            trucks = dff['Auto'].unique()
+            for truck in trucks:
+                truck_data = dff[dff['Auto'] == truck]
+                carrier = truck_data.iloc[0]['Przewoźnik']
+                st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span style="font-size: 0.8em; opacity: 0.9;">PRZEWOŹNIK: {carrier}</span></div>', unsafe_allow_html=True)
+                t_cols = st.columns(3)
+                for idx, (_, row) in enumerate(truck_data.iterrows()):
+                    with t_cols[idx % 3]:
+                        s = str(row['STATUS']).upper()
+                        s_class = ""
+                        if "TRASIE" in s: s_class = "status-trasie"
+                        elif "RAMP" in s: s_class = "status-rampa"
+                        elif "ROZŁADOWANY" in s: s_class = "status-rozladowany"
+                        elif "EMPTIES" in s: s_class = "status-empties"
+                        elif "ZAŁADOWANY" in s: s_class = "status-zaladowany"
+                        elif "PUSTY" in s: s_class = "status-pusty"
+
+                        st.markdown(f"""
+                            <div class="transport-card {s_class}">
+                                <div style="font-size: 0.8em; color: #666;">{row['Data']} | Slot: {row['Nr Slotu']}</div>
+                                <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">{row['Nazwa Projektu'] if row['Nazwa Projektu'] else 'Puste Empties'}</div>
+                                <div style="font-size: 0.9em; margin-bottom: 8px;">👤 {row['Kierowca']}<br>📍 Hala: {row['Hala']} | Godz: {row['Godzina']}</div>
+                                <div style="font-weight: bold; text-align: center; background: #eee; border-radius: 4px; padding: 2px; font-size: 0.85em;">{row['STATUS']}</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        b1, b2 = st.columns(2)
+                        with b1:
+                            if row['spis casów']: st.link_button("📋 Spis", row['spis casów'], use_container_width=True)
+                            if row['SLOT']: st.link_button("⏰ Slot", row['SLOT'], use_container_width=True)
+                        with b2:
+                            if row['zdjęcie po załadunku']: st.link_button("📸 Foto", row['zdjęcie po załadunku'], use_container_width=True)
+                            if row['zrzut z currenta']: st.link_button("🖼️ Current", row['zrzut z currenta'], use_container_width=True)
+                        
+                        with st.expander("📝 Notatka"):
+                            st.write(row['NOTATKA'] if row['NOTATKA'] else "Brak")
+                st.markdown('<hr class="truck-line">', unsafe_allow_html=True)
+
+        # --- 6. NAGŁÓWEK I METRYKI ---
+        st.title("🏗️ SQM Control Tower")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
+        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
+        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
+
+        # ZAKŁADKI
         tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"])
         
         statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
@@ -135,82 +203,81 @@ if check_password():
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
 
+                # --- LOGIKA SLOTÓW NA EMPTIES ---
                 if key == "empties_slots":
                     st.subheader("Zarządzanie Slotami na Empties")
-                    st.info("💡 Zmień Przewoźnika w tabeli i zapisz – Auto i Kierowca uzupełnią się automatycznie.")
-                    
                     ed_es = st.data_editor(
                         df_view[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'SLOT', 'STATUS', 'NOTATKA']], 
-                        use_container_width=True,
-                        column_config=column_cfg_main,
-                        key="ed_empties_slots",
-                        hide_index=True,
-                        num_rows="dynamic"
+                        use_container_width=True, column_config=column_cfg_main, key="ed_empties_slots", hide_index=True, num_rows="dynamic"
                     )
                     edit_trackers["ed_empties_slots"] = (df_view, ed_es)
 
-                    # --- FORMULARZ DODAWANIA ---
-                    with st.expander("➕ DODAJ NOWY SLOT"):
+                    with st.expander("➕ Dodaj nowy slot"):
                         with st.form("new_empty_slot", clear_on_submit=True):
                             c1, c2, c3, c4 = st.columns(4)
                             f_date = c1.date_input("Data", value=datetime.now())
                             f_slot = c2.text_input("Numer Slotu")
                             f_time = c3.text_input("Godzina")
                             f_hala = c4.selectbox("Hala", hala_options)
-                            
                             c5, c6, c7 = st.columns(3)
-                            f_carrier = c5.selectbox("Przewoźnik", options=available_carriers_with_blank)
+                            f_carrier = c5.selectbox("Przewoźnik", options=carriers_list)
                             f_status = c6.selectbox("Status", ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK"])
                             f_pdf = c7.text_input("Link do PDF")
                             f_note = st.text_area("Notatka")
-                            
                             if st.form_submit_button("DODAJ DO BAZY"):
                                 new_row = {col: "" for col in df.columns}
-                                a_val, k_val, c_val = "", "", ""
+                                a_v, k_v, c_v = "", "", ""
                                 if f_carrier not in ["", "--- BRAK ---"]:
                                     info = df_empties_source[df_empties_source['Przewoźnik'] == f_carrier].iloc[0]
-                                    c_val, a_val, k_val = f_carrier, info['Auto'], info['Kierowca']
-                                
-                                new_row.update({
-                                    "Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time,
-                                    "Hala": f_hala, "Przewoźnik": c_val, "Auto": a_val, "Kierowca": k_val,
-                                    "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note
-                                })
+                                    c_v, a_v, k_v = f_carrier, info['Auto'], info['Kierowca']
+                                new_row.update({"Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time, "Hala": f_hala, "Przewoźnik": c_v, "Auto": a_v, "Kierowca": k_v, "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note})
                                 updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                                 conn.update(spreadsheet=URL, data=updated_df)
                                 st.cache_data.clear()
                                 st.rerun()
 
-                elif key == "empty":
-                    ed_p = st.data_editor(df_view[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']], use_container_width=True, key="ed_empty", hide_index=True)
-                    edit_trackers["ed_empty"] = (df_view, ed_p)
+                # --- STANDARDOWE WIDOKI ---
                 else:
-                    ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg_main)
-                    edit_trackers[f"ed_{key}"] = (df_view, ed)
+                    c1, c2, c3 = st.columns([1.5, 2, 1])
+                    with c1:
+                        if key == "in":
+                            d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
+                            all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
+                    with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
+                    with c3:
+                        st.write("###")
+                        if st.button("🔄 Odśwież", key=f"r_{key}"):
+                            st.cache_data.clear()
+                            st.rerun()
 
-        # --- 7. GLOBALNY ZAPIS ZMIAN Z AUTOUZUPEŁNIANIEM ---
+                    if key == "in" and not all_d:
+                        df_view['Data_dt'] = pd.to_datetime(df_view['Data'], errors='coerce')
+                        df_view = df_view[df_view['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
+                    if search:
+                        df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+
+                    if view_mode == "Tradycyjny":
+                        ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg_main)
+                        edit_trackers[f"ed_{key}"] = (df_view, ed)
+                    else:
+                        render_grouped_tiles(df_view)
+
+        # --- 7. ZAPIS ZMIAN ---
         st.divider()
         if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
             final_df = df.copy()
             for k, (orig_df_part, ed_df) in edit_trackers.items():
                 state = st.session_state[k]
-                
-                # Usuwanie
                 if state.get("deleted_rows"):
                     final_df = final_df.drop(orig_df_part.index[state["deleted_rows"]])
-                
-                # Edycja
                 for r_idx_str, col_ch in state.get("edited_rows", {}).items():
                     real_idx = orig_df_part.index[int(r_idx_str)]
                     if real_idx in final_df.index:
                         for col, val in col_ch.items():
                             final_df.at[real_idx, col] = val
-                            
-                            # LOGIKA AUTOUZUPEŁNIANIA: Jeśli zmieniono przewoźnika w zakładce slotów
                             if k == "ed_empties_slots" and col == "Przewoźnik":
                                 if val in ["", "--- BRAK ---"]:
-                                    final_df.at[real_idx, "Auto"] = ""
-                                    final_df.at[real_idx, "Kierowca"] = ""
+                                    final_df.at[real_idx, "Auto"] = ""; final_df.at[real_idx, "Kierowca"] = ""
                                 else:
                                     match = df_empties_source[df_empties_source['Przewoźnik'] == val]
                                     if not match.empty:
@@ -220,7 +287,7 @@ if check_password():
             if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zapisano i zaktualizowano dane przewoźników!")
+            st.success("Baza zaktualizowana!")
             st.rerun()
 
     except Exception as e:
