@@ -5,7 +5,7 @@ from datetime import datetime
 from streamlit_cookies_controller import CookieController
 
 # --- 1. KONFIGURACJA STRONY ---
-st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide")
+st.set_page_config(page_title="SQM CONTROL TOWER", layout="wide", initial_sidebar_state="expanded")
 
 # --- 2. AUTORYZACJA ---
 controller = CookieController()
@@ -16,7 +16,6 @@ def check_password():
     saved_auth = controller.get("sqm_login_key")
     if saved_auth == "Czaman2026" or st.session_state["password_correct"]:
         return True
-    
     st.title("🏗️ SQM Logistics - Control Tower")
     pwd = st.text_input("Hasło dostępu:", type="password")
     if pwd == "Czaman2026":
@@ -26,13 +25,30 @@ def check_password():
     return False
 
 if check_password():
-    # --- 3. DANE ---
+    # --- 3. STYLE CSS ---
+    st.markdown("""
+        <style>
+        div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
+        .truck-separator {
+            background-color: #2c3e50; color: white; padding: 10px 20px; border-radius: 8px;
+            margin: 30px 0 15px 0; display: flex; justify-content: space-between; align-items: center;
+        }
+        .transport-card {
+            background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px;
+            padding: 15px; margin-bottom: 10px; border-left: 8px solid #ccc;
+        }
+        .status-trasie { border-left-color: #ffeb3b; }
+        .status-rampa { border-left-color: #f44336; }
+        .status-rozladowany { border-left-color: #4caf50; }
+        .status-empties { border-left-color: #9e9e9e; }
+        .status-zaladowany { border-left-color: #2196f3; }
+        .status-pusty { border-left-color: #ffffff; border-left-style: dashed; }
+        </style>
+        """, unsafe_allow_html=True)
+
+    # --- 4. POŁĄCZENIE I DANE ---
     URL = "https://docs.google.com/spreadsheets/d/1_h9YkM5f8Wm-Y0HWKN-_dZ1qjvTmdwMB_2TZTirlC9k/edit?usp=sharing"
     conn = st.connection("gsheets", type=GSheetsConnection)
-
-    # Inicjalizacja stanu zakładki
-    if "current_tab" not in st.session_state:
-        st.session_state.current_tab = 0
 
     try:
         df = conn.read(spreadsheet=URL, ttl="2s").dropna(how="all")
@@ -50,137 +66,111 @@ if check_password():
         p_fiz = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]['Auto'].unique()
         m4.metric("⚪ PUSTE AUTA", len([a for a in p_fiz if a and a != '']))
 
-        # --- 4. LISTY I KONFIGURACJA ---
-        carriers_list = sorted([c for c in df['Przewoźnik'].unique() if c and c != ""])
-        status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTY"]
-        empties_ops = ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "ZAŁADOWANY NA POWRÓT"]
-
-        # --- 5. TABS ---
-        tab_list = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "⏰ SLOTY NA EMPTIES", "📚 BAZA"]
-        
-        # Funkcja pomocnicza do zmiany zakładki w sesji
-        def on_tab_change():
-            # Streamlit obecnie nie wspiera bezpośredniego on_change dla tabs, 
-            # więc używamy indeksu przy renderowaniu
-            pass
-
-        tabs = st.tabs(tab_list)
-        edit_trackers = {}
-
-        # --- ZAKŁADKA 3: SLOTY NA EMPTIES ---
-        with tabs[3]:
-            st.subheader("Planowanie operacji Empties")
-            with st.form("f_emp_plan"):
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    nd = st.date_input("Data", datetime.now())
-                    nh = st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
-                    ns = st.text_input("Slot")
-                with c2:
-                    nt = st.text_input("Godzina")
-                    np_form = st.selectbox("Przewoźnik (opcjonalnie)", [""] + carriers_list)
-                    nst = st.selectbox("Status", empties_ops)
-                with c3:
-                    nn = st.text_area("Notatka dodatkowa")
-                    if st.form_submit_button("💾 DODAJ SLOT"):
-                        fresh = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
-                        new_r = pd.DataFrame([{'Data': str(nd), 'Nr Slotu': ns, 'Godzina': nt, 'Hala': nh, 'Przewoźnik': np_form, 'STATUS': nst, 'Nazwa Projektu': '--- OPERACJA EMPTIES ---', 'NOTATKA DODATKOWA': nn}])
-                        conn.update(spreadsheet=URL, data=pd.concat([fresh, new_r], ignore_index=True))
-                        st.cache_data.clear()
-                        st.session_state.current_tab = 3
-                        st.rerun()
-
+        # --- SIDEBAR (Filtry i Widok) ---
+        with st.sidebar:
+            st.header("⚙️ Ustawienia")
+            view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
             st.divider()
-            df_s_v = df[df['STATUS'].isin(empties_ops)].copy()
-            if not df_s_v.empty:
-                df_s_v.insert(0, "USUŃ", False)
-                ed_s = st.data_editor(
-                    df_s_v[['USUŃ', 'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'STATUS', 'NOTATKA DODATKOWA']], 
-                    use_container_width=True, key="ed_empties", hide_index=True,
-                    column_config={
-                        "USUŃ": st.column_config.CheckboxColumn("🗑️", width="small"),
-                        "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=carriers_list),
-                        "STATUS": st.column_config.SelectboxColumn("Status", options=empties_ops)
-                    }
-                )
-                edit_trackers["ed_empties"] = (df_s_v, ed_s, 3)
-
-        # --- ZAKŁADKI 0, 1, 4 (MONTAŻE, ROZŁADOWANE, BAZA) ---
-        for i, (t_idx, key, m_filter) in enumerate([
-            (0, "in", (~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|PUSTY|EMPTIES", na=False)) & (~df['STATUS'].isin(empties_ops))),
-            (1, "out", df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY", na=False)),
-            (4, "all", None)
-        ]):
-            with tabs[t_idx]:
-                src = st.text_input("🔍 Szukaj:", key=f"s_{key}")
-                df_v = df[m_filter].copy() if m_filter is not None else df.copy()
-                if src:
-                    df_v = df_v[df_v.apply(lambda r: r.astype(str).str.contains(src, case=False).any(), axis=1)]
-                
-                df_v.insert(0, "USUŃ", False)
-                df_v.insert(1, "PODGLĄD", False)
-                
-                ed = st.data_editor(
-                    df_v, use_container_width=True, key=f"ed_{key}", hide_index=True,
-                    column_config={
-                        "USUŃ": st.column_config.CheckboxColumn("🗑️"), 
-                        "PODGLĄD": st.column_config.CheckboxColumn("👁️"),
-                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options + empties_ops),
-                        "NOTATKA DODATKOWA": None
-                    }
-                )
-                edit_trackers[f"ed_{key}"] = (df_v, ed, t_idx)
-                
-                sel = ed[ed["PODGLĄD"] == True]
-                if not sel.empty:
-                    r = sel.iloc[-1]
-                    st.info(f"📝 **Notatka:** {r['NOTATKA']}")
-                    if r['NOTATKA DODATKOWA']: st.warning(f"💡 **Dodatkowa:** {r['NOTATKA DODATKOWA']}")
-
-        # --- ZAKŁADKA 2: PUSTE ---
-        with tabs[2]:
-            df_p = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)].copy()
-            if not df_p.empty:
-                df_p_g = df_p.groupby('Auto').agg({'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'first'}).reset_index()
-                st.data_editor(df_p_g, use_container_width=True, hide_index=True)
-
-        # --- 6. GLOBALNY ZAPIS I USUWANIE ---
-        st.divider()
-        if st.button("💾 ZAPISZ ZMIANY / USUŃ ZAZNACZONE", type="primary", use_container_width=True):
-            try:
-                # Pobierz aktualny stan bazy bezpośrednio przed zapisem
-                current_db = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
-                
-                to_delete_indices = []
-                
-                # Iteruj przez wszystkie trackery zmian (ze wszystkich widocznych tabel)
-                for k, (orig_df, edited_df, t_idx) in edit_trackers.items():
-                    # Sprawdź każdy wiersz w edytowanej tabeli
-                    for i in range(len(edited_df)):
-                        real_idx = orig_df.index[i] # Pobierz index z oryginalnej ramki danych
-                        
-                        # Jeśli zaznaczono USUŃ
-                        if edited_df.iloc[i]["USUŃ"] == True:
-                            to_delete_indices.append(real_idx)
-                        else:
-                            # Aktualizuj dane w głównej bazie
-                            for col in edited_df.columns:
-                                if col in current_db.columns:
-                                    current_db.at[real_idx, col] = edited_df.iloc[i][col]
-
-                # Usuń zaznaczone wiersze
-                if to_delete_indices:
-                    current_db = current_db.drop(to_delete_indices)
-                
-                # Zapisz do Google Sheets
-                conn.update(spreadsheet=URL, data=current_db[all_cols])
-                st.cache_data.clear()
-                
-                st.success(f"Pomyślnie zaktualizowano bazę danych. Usunięto {len(to_delete_indices)} wierszy.")
+            f_hala = st.multiselect("Filtruj Halę:", options=sorted(df['Hala'].unique()))
+            f_status = st.multiselect("Filtruj Status:", options=sorted(df['STATUS'].unique()))
+            st.divider()
+            if st.button("Wyloguj"):
+                controller.remove("sqm_login_key")
+                st.session_state["password_correct"] = False
                 st.rerun()
 
-            except Exception as e:
-                st.error(f"Błąd podczas zapisu: {e}")
+        # Listy wyborów
+        carriers_list = sorted([c for c in df['Przewoźnik'].unique() if c and c != ""])
+        status_options = ["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"]
+        empties_ops = ["ODBIERA EMPTIES", "ZAWOZI EMPTIES", "ODBIERA PEŁNE", "ZAŁADOWANY NA POWRÓT"]
 
-    except Exception as e:
-        st.error(f"Błąd połączenia: {e}")
+        # --- 5. FUNKCJA KAFELKÓW ---
+        def render_tiles(dataframe):
+            dff = dataframe.copy()
+            if f_hala: dff = dff[dff['Hala'].isin(f_hala)]
+            if f_status: dff = dff[dff['STATUS'].isin(f_status)]
+            
+            for truck in dff['Auto'].unique():
+                t_data = dff[dff['Auto'] == truck]
+                st.markdown(f'<div class="truck-separator"><span>🚛 AUTO: <b>{truck}</b></span><span>{t_data.iloc[0]["Przewoźnik"]}</span></div>', unsafe_allow_html=True)
+                cols = st.columns(3)
+                for i, (_, row) in enumerate(t_data.iterrows()):
+                    with cols[i % 3]:
+                        s = str(row['STATUS']).upper()
+                        c = "status-trasie" if "TRASIE" in s else "status-rampa" if "RAMP" in s else "status-rozladowany" if "ROZŁADOWANY" in s else "status-empties" if "EMPTIES" in s else "status-zaladowany" if "ZAŁADOWANY" in s else "status-pusty"
+                        st.markdown(f'<div class="transport-card {c}"><b>[{row["Nr Proj."]}] {row["Nazwa Projektu"]}</b><br>📍 {row["Hala"]} | {row["Godzina"]}<br><b>{row["STATUS"]}</b></div>', unsafe_allow_html=True)
+                        if row['spis casów']: st.link_button("📋 Spis", row['spis casów'], use_container_width=True)
+                        with st.expander("📝 Notatki"):
+                            st.write(f"Główna: {row['NOTATKA']}")
+                            st.write(f"Dodatkowa: {row['NOTATKA DODATKOWA']}")
+
+        # --- 6. ZAKŁADKI ---
+        tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "⏰ SLOTY NA EMPTIES", "📚 BAZA"])
+        edit_trackers = {}
+
+        # SLOTY NA EMPTIES
+        with tabs[3]:
+            with st.form("f_emp"):
+                c1, c2, c3 = st.columns(3)
+                with c1: nd, nh, ns = st.date_input("Data"), st.selectbox("Hala", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"]), st.text_input("Slot")
+                with c2: nt, np_f = st.text_input("Godzina"), st.selectbox("Przewoźnik", [""] + carriers_list)
+                with c3: nst, nn = st.selectbox("Status", empties_ops), st.text_area("Notatka")
+                if st.form_submit_button("💾 DODAJ SLOT"):
+                    fr = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
+                    nr = pd.DataFrame([{'Data': str(nd), 'Nr Slotu': ns, 'Godzina': nt, 'Hala': nh, 'Przewoźnik': np_f, 'STATUS': nst, 'Nazwa Projektu': '--- OPERACJA EMPTIES ---', 'NOTATKA DODATKOWA': nn}])
+                    conn.update(spreadsheet=URL, data=pd.concat([fr, nr], ignore_index=True))
+                    st.cache_data.clear()
+                    st.rerun()
+
+            st.divider()
+            df_s = df[df['STATUS'].isin(empties_ops)].copy()
+            if not df_s.empty:
+                df_s.insert(0, "USUŃ", False)
+                ed_s = st.data_editor(df_s[['USUŃ', 'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'STATUS', 'NOTATKA DODATKOWA']], use_container_width=True, hide_index=True, column_config={"USUŃ": st.column_config.CheckboxColumn("🗑️"), "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=carriers_list)})
+                edit_trackers["empties"] = (df_s, ed_s)
+
+        # MONTAŻE (0), ROZŁADOWANE (1), BAZA (4)
+        for t_idx, m_filt, key in [(0, (~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|PUSTY|EMPTIES", na=False)) & (~df['STATUS'].isin(empties_ops)), "in"), (1, df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY", na=False), "out"), (4, None, "all")]:
+            with tabs[t_idx]:
+                df_v = df[m_filt].copy() if m_filt is not None else df.copy()
+                src = st.text_input("🔍 Szukaj:", key=f"src_{key}")
+                if src: df_v = df_v[df_v.apply(lambda r: r.astype(str).str.contains(src, case=False).any(), axis=1)]
+                
+                if view_mode == "Tradycyjny":
+                    df_v.insert(0, "USUŃ", False)
+                    df_v.insert(1, "PODGLĄD", False)
+                    ed = st.data_editor(df_v, use_container_width=True, hide_index=True, column_config={
+                        "USUŃ": st.column_config.CheckboxColumn("🗑️"), "PODGLĄD": st.column_config.CheckboxColumn("👁️"),
+                        "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
+                        "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
+                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=status_options + empties_ops),
+                        "NOTATKA DODATKOWA": None
+                    })
+                    edit_trackers[key] = (df_v, ed)
+                    sel = ed[ed["PODGLĄD"] == True]
+                    if not sel.empty:
+                        st.info(f"📝 {sel.iloc[-1]['NOTATKA']} | 💡 {sel.iloc[-1]['NOTATKA DODATKOWA']}")
+                else: render_tiles(df_v)
+
+        with tabs[2]: # PUSTE
+            df_p = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)].copy()
+            st.data_editor(df_p.groupby('Auto').agg({'Przewoźnik': 'first', 'STATUS': 'first'}).reset_index(), use_container_width=True, hide_index=True)
+
+        # --- 7. GLOBALNY ZAPIS ---
+        st.divider()
+        if st.button("💾 ZAPISZ ZMIANY / USUŃ ZAZNACZONE", type="primary", use_container_width=True):
+            db = conn.read(spreadsheet=URL, ttl="0s").dropna(how="all")
+            to_del = []
+            for k, (orig, edit) in edit_trackers.items():
+                for i in range(len(edit)):
+                    idx = orig.index[i]
+                    if edit.iloc[i]["USUŃ"]: to_del.append(idx)
+                    else:
+                        for col in edit.columns:
+                            if col in db.columns: db.at[idx, col] = edit.iloc[i][col]
+            db = db.drop(to_del)
+            conn.update(spreadsheet=URL, data=db[all_cols])
+            st.cache_data.clear()
+            st.rerun()
+
+    except Exception as e: st.error(f"Błąd: {e}")
