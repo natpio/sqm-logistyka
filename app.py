@@ -81,7 +81,7 @@ if check_password():
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
 
-        # --- DANE POMOCNICZE DO LIST WYBORU ---
+        # --- DANE POMOCNICZE ---
         statusy_puste = "PUSTY|EMPTIES"
         df_empties_source = df[df['STATUS'].str.contains(statusy_puste, na=False, case=False)]
         available_carriers = sorted(df_empties_source['Przewoźnik'].unique().tolist())
@@ -132,7 +132,7 @@ if check_password():
                 if f_carrier: dff = dff[dff['Przewoźnik'].isin(f_carrier)]
 
             if dff.empty:
-                st.info("Brak danych dla wybranych filtrów.")
+                st.info("Brak danych.")
                 return
             
             trucks = dff['Auto'].unique()
@@ -155,7 +155,7 @@ if check_password():
                         st.markdown(f"""
                             <div class="transport-card {s_class}">
                                 <div style="font-size: 0.8em; color: #666;">{row['Data']} | Slot: {row['Nr Slotu']}</div>
-                                <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">{row['Nazwa Projektu'] if row['Nazwa Projektu'] else 'Puste Empties'}</div>
+                                <div style="font-weight: bold; font-size: 1.1em; color: #1f77b4; margin: 5px 0;">{row['Nazwa Projektu'] if row['Nazwa Projektu'] else 'Operacja Empties'}</div>
                                 <div style="font-size: 0.9em; margin-bottom: 8px;">👤 {row['Kierowca']}<br>📍 Hala: {row['Hala']} | Godz: {row['Godzina']}</div>
                                 <div style="font-weight: bold; text-align: center; background: #eee; border-radius: 4px; padding: 2px; font-size: 0.85em;">{row['STATUS']}</div>
                             </div>
@@ -175,10 +175,15 @@ if check_password():
 
         # --- 6. NAGŁÓWEK I METRYKI ---
         st.title("🏗️ SQM Control Tower")
-        m1, m2, m3 = st.columns(3)
+        
+        # Obliczanie unikalnych pustych aut
+        unique_empty_trucks = df_empties_source['Auto'].nunique()
+
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
+        m4.metric("WOLNE AUTA 📦", unique_empty_trucks)
 
         # ZAKŁADKI
         tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"])
@@ -203,7 +208,6 @@ if check_password():
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
 
-                # --- LOGIKA SLOTÓW NA EMPTIES ---
                 if key == "empties_slots":
                     st.subheader("Zarządzanie Slotami na Empties")
                     ed_es = st.data_editor(
@@ -228,15 +232,16 @@ if check_password():
                                 new_row = {col: "" for col in df.columns}
                                 a_v, k_v, c_v = "", "", ""
                                 if f_carrier not in ["", "--- BRAK ---"]:
-                                    info = df_empties_source[df_empties_source['Przewoźnik'] == f_carrier].iloc[0]
-                                    c_v, a_v, k_v = f_carrier, info['Auto'], info['Kierowca']
+                                    match = df_empties_source[df_empties_source['Przewoźnik'] == f_carrier]
+                                    if not match.empty:
+                                        info = match.iloc[0]
+                                        c_v, a_v, k_v = f_carrier, info['Auto'], info['Kierowca']
                                 new_row.update({"Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time, "Hala": f_hala, "Przewoźnik": c_v, "Auto": a_v, "Kierowca": k_v, "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note})
                                 updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                                 conn.update(spreadsheet=URL, data=updated_df)
                                 st.cache_data.clear()
                                 st.rerun()
 
-                # --- STANDARDOWE WIDOKI ---
                 else:
                     c1, c2, c3 = st.columns([1.5, 2, 1])
                     with c1:
@@ -287,7 +292,7 @@ if check_password():
             if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Baza zaktualizowana!")
+            st.success("Zmiany zapisane!")
             st.rerun()
 
     except Exception as e:
