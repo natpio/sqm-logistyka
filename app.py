@@ -62,19 +62,19 @@ if check_password():
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
-        # FIX dla checkboxów
+        # Wymuszenie typu dla checkboxa podglądu
         df["PODGLĄD"] = False
 
         # --- 5. NAGŁÓWEK I METRYKI ---
         st.title("🏗️ SQM Control Tower")
         
-        # Obliczenia dla metryk
+        # Obliczenia statusów
         count_trasie = len(df[df['STATUS'].str.contains("TRASIE", na=False)])
         count_rampa = len(df[df['STATUS'].str.contains("RAMP", na=False)])
         count_zakonczone = len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)])
-        # Metryka pustych trucków (unikalne auta ze statusem PUSTY lub EMPTIES)
-        puste_auta_df = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]
-        count_puste = puste_auta_df['Auto'].nunique()
+        # Nowa metryka: unikalne auta ze statusem PUSTY/EMPTIES
+        puste_df = df[df['STATUS'].str.contains("PUSTY|EMPTIES", na=False, case=False)]
+        count_puste = puste_df['Auto'].nunique()
 
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("W TRASIE 🟡", count_trasie)
@@ -88,7 +88,7 @@ if check_password():
 
         for i, (tab, key) in enumerate(zip(tabs, ["in", "out", "empty", "full"])):
             with tab:
-                # Definicja masek dla zakładek
+                # Maskowanie danych dla odpowiednich zakładek
                 if key == "in":
                     mask = (~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|PUSTY|EMPTIES", na=False, case=False))
                 elif key == "out":
@@ -99,35 +99,33 @@ if check_password():
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
 
-                # --- Logika dla PUSTE TRUCKI ---
+                # --- SPECYFIKA ZAKŁADKI PUSTE TRUCKI ---
                 if key == "empty":
                     if not df_view.empty:
-                        # Grupowanie, aby wiersze (Auto) się nie powtarzały
+                        # Grupowanie unikalnych aut
                         df_empty_grouped = df_view.groupby('Auto').agg({
                             'Przewoźnik': 'first',
                             'Kierowca': 'first',
                             'STATUS': 'first'
                         }).reset_index()
                         
-                        # Reorganizacja kolumn zgodnie z prośbą
+                        # Wybór i kolejność kolumn
                         df_empty_grouped = df_empty_grouped[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']]
-                        
-                        # Dodanie LP
                         df_empty_grouped.insert(0, "LP", range(1, len(df_empty_grouped) + 1))
                         
-                        column_cfg_empty = {
+                        cfg_empty = {
                             "LP": st.column_config.NumberColumn("LP", width="small", disabled=True),
-                            "STATUS": st.column_config.SelectboxColumn("STATUS (Masowa zmiana)", 
+                            "STATUS": st.column_config.SelectboxColumn("Zmień status auta", 
                                 options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"], width="large")
                         }
                         
-                        ed_p = st.data_editor(df_empty_grouped, use_container_width=True, hide_index=True, 
-                                             key="ed_empty", column_config=column_cfg_empty)
-                        edit_trackers["ed_empty"] = (df_empty_grouped, ed_p)
+                        ed_empty = st.data_editor(df_empty_grouped, use_container_width=True, hide_index=True, 
+                                                 key="ed_empty", column_config=cfg_empty)
+                        edit_trackers["ed_empty"] = (df_empty_grouped, ed_empty)
                     else:
-                        st.info("Brak pustych trucków.")
+                        st.info("Brak pojazdów o statusie Pusty/Empties.")
 
-                # --- Logika dla pozostałych zakładek ---
+                # --- POZOSTAŁE ZAKŁADKI (MONTAŻE, ROZŁADOWANE, BAZA) ---
                 else:
                     c1, c2 = st.columns([1, 2])
                     with c1:
@@ -136,8 +134,10 @@ if check_password():
                     with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
 
                     if not all_d: df_view = df_view[df_view['Data'] == str(d_val)]
-                    if search: df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+                    if search:
+                        df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
+                    # Dodanie LP i Checkboxa Usuń
                     df_view.insert(0, "LP", range(1, len(df_view) + 1))
                     df_view.insert(1, "USUŃ", False)
 
@@ -145,20 +145,22 @@ if check_password():
                         "LP": st.column_config.NumberColumn("LP", width="small", disabled=True),
                         "USUŃ": st.column_config.CheckboxColumn("🗑️", width="small"),
                         "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"], width="medium"),
+                        "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"]),
                         "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
                         "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
                         "zrzut z currenta": st.column_config.LinkColumn("🖼️ Current", display_text="Otwórz"),
                         "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz")
                     }
+                    
                     ed = st.data_editor(df_view, use_container_width=True, hide_index=True, key=f"ed_{key}", column_config=column_cfg)
                     edit_trackers[f"ed_{key}"] = (df_view, ed)
                     
+                    # Logika podglądu notatki
                     if not ed[ed["PODGLĄD"] == True].empty:
                         row = ed[ed["PODGLĄD"] == True].iloc[-1]
-                        st.info(f"**Notatka:** {row['NOTATKA']}")
+                        st.info(f"**[{row['Nr Proj.']}] {row['Nazwa Projektu']}**\n\n{row['NOTATKA']}")
 
-        # --- 7. ZAPIS ZMIAN ---
+        # --- 7. GLOBALNY ZAPIS ZMIAN ---
         st.divider()
         if st.button("💾 ZAPISZ ZMIANY / USUŃ ZAZNACZONE", type="primary", use_container_width=True):
             final_df = df.copy()
@@ -171,12 +173,12 @@ if check_password():
                     r_idx_int = int(r_idx_str)
                     
                     if k == "ed_empty":
-                        # Logika masowej zmiany statusu dla wszystkich wierszy danego Auta
+                        # Masowa zmiana statusu dla wszystkich wierszy danego Auta
                         truck_id = orig_df_part.iloc[r_idx_int]['Auto']
                         if "STATUS" in col_ch:
                             final_df.loc[final_df['Auto'] == truck_id, 'STATUS'] = col_ch["STATUS"]
                     else:
-                        # Standardowy zapis po indeksie
+                        # Standardowa zmiana lub usuwanie po indeksie
                         real_idx = orig_df_part.index[r_idx_int]
                         if col_ch.get("USUŃ") == True:
                             rows_to_delete.append(real_idx)
@@ -185,17 +187,21 @@ if check_password():
                                 if col not in ["LP", "USUŃ", "PODGLĄD"]:
                                     final_df.at[real_idx, col] = val
             
-            if rows_to_delete: final_df = final_df.drop(rows_to_delete)
+            # Realizacja usuwania
+            if rows_to_delete:
+                final_df = final_df.drop(rows_to_delete)
             
-            # Czyszczenie przed wysłaniem do Sheets
-            cols_to_drop = ["LP", "USUŃ", "PODGLĄD"]
-            final_df = final_df.drop(columns=[c for c in cols_to_drop if c in final_df.columns])
+            # Czyszczenie kolumn technicznych
+            for c_drop in ["LP", "USUŃ", "PODGLĄD"]:
+                if c_drop in final_df.columns:
+                    final_df = final_df.drop(columns=[c_drop])
             
+            # Wysyłka do Google Sheets
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success("Zmiany zapisane!")
+            st.success(f"Zapisano pomyślnie! (Usunięto: {len(rows_to_delete)})")
             time.sleep(1)
             st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd: {e}")
+        st.error(f"Krytyczny błąd aplikacji: {e}")
