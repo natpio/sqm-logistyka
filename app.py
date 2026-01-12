@@ -48,10 +48,9 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Odczyt danych
+        # Odczyt danych i usunięcie tylko całkowicie pustych wierszy
         raw_df = conn.read(spreadsheet=URL, ttl="1m")
-        # Usuwamy tylko te wiersze, które są całkowicie puste we wszystkich kluczowych kolumnach
-        df = raw_df.dropna(subset=['Nr Proj.', 'STATUS'], how='all').reset_index(drop=True)
+        df = raw_df.dropna(how="all").reset_index(drop=True)
         
         all_cols = [
             'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 
@@ -59,13 +58,14 @@ if check_password():
             'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA'
         ]
         
+        # Standaryzacja kolumn i czyszczenie wartości niepożądanych
         for col in all_cols:
             if col not in df.columns:
                 df[col] = ""
             if col != "PODGLĄD":
-                df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>'], '')
+                df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
 
-        # Obsługa kolumny PODGLĄD
+        # Naprawa kolumny PODGLĄD (Checkbox)
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
         else:
@@ -82,6 +82,7 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
+        # Konfiguracja wyświetlania kolumn
         column_cfg = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
                 "🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", 
@@ -120,18 +121,18 @@ if check_password():
                 all_d = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c3: search_in = st.text_input("🔍 Szukaj projektu:", key="s_in")
 
-            # POPRAWIONA MASKA: Wiersz zostaje, jeśli ma numer projektu, nawet gdy Auto i Slot są puste
+            # POPRAWIONA MASKA: Wiersz zostaje, jeśli ma numer projektu (nawet bez slotu/auta)
             mask_in = (
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
                 (~df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)) &
                 (~df['Nr Proj.'].str.contains("EMPTIES", na=False, case=False)) &
-                (df['Nr Proj.'] != "") # Wystarczy numer projektu, by wiersz widniał w montażach
+                (df['Nr Proj.'] != "")
             )
             df_in = df[mask_in].copy()
 
             if not all_d:
-                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce')
+                df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce', dayfirst=True)
                 df_in = df_in[df_in['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
             if search_in:
                 df_in = df_in[df_in.apply(lambda r: r.astype(str).str.contains(search_in, case=False).any(), axis=1)]
@@ -187,12 +188,10 @@ if check_password():
                 
                 if st.form_submit_button("DODAJ SLOT", use_container_width=True):
                     auto_val, kier_val = "", ""
-                    curr_carr = f_c
-                    if f_c != "-- Brak / Nowy --":
+                    curr_carr = f_c if f_c != "-- Brak / Nowy --" else ""
+                    if curr_carr:
                         match = df_puste_form[df_puste_form['Przewoźnik'] == f_c].iloc[0]
                         auto_val, kier_val = match['Auto'], match['Kierowca']
-                    else:
-                        curr_carr = ""
 
                     new_row_data = {
                         "Data": str(f_d), "Nr Slotu": f_s, "Godzina": f_g, "Hala": f_h,
@@ -202,7 +201,6 @@ if check_password():
                     
                     row_full = {col: new_row_data.get(col, "") for col in all_cols}
                     save_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
-                    
                     if "PODGLĄD" in save_df.columns: save_df = save_df.drop(columns=["PODGLĄD"])
                     
                     conn.update(spreadsheet=URL, data=save_df[all_cols])
@@ -223,29 +221,38 @@ if check_password():
             ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_full"] = (df, ed_full)
 
-        # --- 8. GLOBALNY ZAPIS ---
+        # --- 8. GLOBALNY ZAPIS (Z POPRAWKĄ INDEKSOWANIA) ---
         if edit_trackers:
             st.divider()
             if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
-                for k, (orig, ed) in edit_trackers.items():
-                    if k in st.session_state:
-                        ch = st.session_state[k].get("edited_rows", {})
+                for k, (orig_df, ed_component) in edit_trackers.items():
+                    # Pobieramy zmiany bezpośrednio ze stanu sesji edytora
+                    state_key = k
+                    if state_key in st.session_state:
+                        changes = st.session_state[state_key].get("edited_rows", {})
+                        
                         if k == "ed_empty":
-                            for r, c in ch.items():
-                                if "STATUS" in c:
-                                    a_id = orig.iloc[int(r)]['Auto']
-                                    final_df.loc[final_df['Auto'] == a_id, 'STATUS'] = c["STATUS"]
+                            # Logika specjalna dla grupowanych aut
+                            for r_idx, c_vals in changes.items():
+                                if "STATUS" in c_vals:
+                                    a_id = orig_df.iloc[int(r_idx)]['Auto']
+                                    final_df.loc[final_df['Auto'] == a_id, 'STATUS'] = c_vals["STATUS"]
                         else:
-                            for r, c in ch.items():
-                                real_idx = orig.index[int(r)]
-                                for col, val in c.items():
-                                    final_df.at[real_idx, col] = val
+                            # Logika standardowa - bezpieczne mapowanie indeksów
+                            for r_idx, c_vals in changes.items():
+                                actual_idx = orig_df.index[int(r_idx)]
+                                for col, val in c_vals.items():
+                                    final_df.at[actual_idx, col] = val
                 
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
+                
+                # Zapis do GSheets
                 conn.update(spreadsheet=URL, data=to_save[all_cols])
-                st.cache_data.clear(); st.success("Zmiany zapisane w arkuszu!"); st.rerun()
+                st.cache_data.clear()
+                st.success("Dane zsynchronizowane z arkuszem!")
+                st.rerun()
 
     except Exception as e:
-        st.error(f"Wystąpił błąd podczas przetwarzania danych: {e}")
+        st.error(f"Krytyczny błąd aplikacji: {e}")
