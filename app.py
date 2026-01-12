@@ -33,22 +33,11 @@ if check_password():
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .truck-separator {
-            background-color: #2c3e50;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 8px;
-            margin: 30px 0 15px 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+            background-color: #2c3e50; color: white; padding: 10px 20px; border-radius: 8px; margin: 30px 0 15px 0;
+            display: flex; justify-content: space-between; align-items: center;
         }
         .transport-card {
-            background-color: #ffffff;
-            border: 1px solid #e0e0e0;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-left: 8px solid #ccc;
+            background-color: #ffffff; border: 1px solid #e0e0e0; border-radius: 10px; padding: 15px; margin-bottom: 10px; border-left: 8px solid #ccc;
         }
         .status-trasie { border-left-color: #ffeb3b; }
         .status-rampa { border-left-color: #f44336; }
@@ -56,11 +45,7 @@ if check_password():
         .status-empties { border-left-color: #9e9e9e; }
         .status-zaladowany { border-left-color: #2196f3; }
         .status-pusty { border-left-color: #ffffff; border-left-style: dashed; }
-        hr.truck-line {
-            border: 0; height: 2px;
-            background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0));
-            margin-top: 40px;
-        }
+        hr.truck-line { border: 0; height: 2px; background-image: linear-gradient(to right, rgba(0, 0, 0, 0), rgba(0, 0, 0, 0.75), rgba(0, 0, 0, 0)); margin-top: 40px; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -77,8 +62,12 @@ if check_password():
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
+        # --- FIX DLA KOLUMNY PODGLĄD ---
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
+        
+        # Konwersja na bool, aby uniknąć błędu FLOAT
+        df['PODGLĄD'] = df['PODGLĄD'].map({'True': True, 'False': False, True: True, False: False, '1': True, '0': False, '1.0': True, '0.0': False}).fillna(False)
 
         # --- DANE POMOCNICZE ---
         statusy_puste_filter = "PUSTY|EMPTIES"
@@ -90,12 +79,6 @@ if check_password():
         with st.sidebar:
             st.header("⚙️ Ustawienia")
             view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
-            if view_mode == "Kafelkowy":
-                st.divider()
-                st.subheader("🔍 Filtry Widoku")
-                f_hala = st.multiselect("Filtruj wg Hali:", options=sorted(df['Hala'].unique()))
-                f_status = st.multiselect("Filtruj wg Statusu:", options=sorted(df['STATUS'].unique()))
-                f_carrier = st.multiselect("Filtruj wg Przewoźnika:", options=sorted(df['Przewoźnik'].unique()))
             st.divider()
             if st.button("Wyloguj"):
                 controller.remove("sqm_login_key")
@@ -130,7 +113,6 @@ if check_password():
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
         m4.metric("WOLNE AUTA 📦", unique_empty_trucks)
 
-        # ZAKŁADKI
         tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"])
         
         statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
@@ -153,42 +135,22 @@ if check_password():
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
 
-                # --- ZAKŁADKA PUSTE TRUCKI (EDYCJA) ---
                 if key == "empty":
-                    st.subheader("Dostępna Flota (Puste/Empties)")
-                    # Grupowanie, aby widzieć tylko unikalne auta i 4 wybrane kolumny
-                    df_empty_grouped = df_view.groupby('Auto').agg({
-                        'Przewoźnik': 'first', 
-                        'Kierowca': 'first', 
-                        'STATUS': 'first'
-                    }).reset_index()
-                    
-                    # Kolejność kolumn: Przewoźnik, Auto, Kierowca, Status
+                    df_empty_grouped = df_view.groupby('Auto').agg({'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'first'}).reset_index()
                     df_empty_grouped = df_empty_grouped[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']]
-                    
                     ed_p = st.data_editor(
-                        df_empty_grouped, 
-                        use_container_width=True, 
-                        key="ed_empty", 
-                        hide_index=True,
-                        column_config={
-                            "STATUS": st.column_config.SelectboxColumn("STATUS", options=["⚪ PUSTY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "🟡 W TRASIE"]),
-                            "Przewoźnik": st.column_config.TextColumn("Przewoźnik", disabled=True),
-                            "Auto": st.column_config.TextColumn("Auto", disabled=True),
-                            "Kierowca": st.column_config.TextColumn("Kierowca", disabled=True)
-                        }
+                        df_empty_grouped, use_container_width=True, key="ed_empty", hide_index=True,
+                        column_config={"STATUS": st.column_config.SelectboxColumn("STATUS", options=["⚪ PUSTY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "🟡 W TRASIE"])}
                     )
                     edit_trackers["ed_empty"] = (df_empty_grouped, ed_p)
 
-                # --- ZAKŁADKA SLOTY NA EMPTIES ---
                 elif key == "empties_slots":
-                    st.subheader("Zarządzanie Slotami na Empties")
                     ed_es = st.data_editor(
                         df_view[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'SLOT', 'STATUS', 'NOTATKA']], 
                         use_container_width=True, column_config=column_cfg_main, key="ed_empties_slots", hide_index=True, num_rows="dynamic"
                     )
                     edit_trackers["ed_empties_slots"] = (df_view, ed_es)
-
+                    
                     with st.expander("➕ Dodaj nowy slot"):
                         with st.form("new_empty_slot", clear_on_submit=True):
                             c1, c2, c3, c4 = st.columns(4)
@@ -208,30 +170,12 @@ if check_password():
                                     match = df_empties_source[df_empties_source['Przewoźnik'] == f_carrier]
                                     if not match.empty:
                                         info = match.iloc[0]; c_v, a_v, k_v = f_carrier, info['Auto'], info['Kierowca']
-                                new_row.update({"Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time, "Hala": f_hala, "Przewoźnik": c_v, "Auto": a_v, "Kierowca": k_v, "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note})
+                                new_row.update({"Data": f_date.strftime("%Y-%m-%d"), "Nr Slotu": f_slot, "Godzina": f_time, "Hala": f_hala, "Przewoźnik": c_v, "Auto": a_v, "Kierowca": k_v, "STATUS": f_status, "SLOT": f_pdf, "NOTATKA": f_note, "PODGLĄD": False})
                                 updated_df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                                 conn.update(spreadsheet=URL, data=updated_df)
                                 st.cache_data.clear(); st.rerun()
 
-                # --- POZOSTAŁE ZAKŁADKI ---
                 else:
-                    c1, c2, c3 = st.columns([1.5, 2, 1])
-                    with c1:
-                        if key == "in":
-                            d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
-                            all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
-                    with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
-                    with c3:
-                        st.write("###")
-                        if st.button("🔄 Odśwież", key=f"r_{key}"):
-                            st.cache_data.clear(); st.rerun()
-
-                    if key == "in" and not all_d:
-                        df_view['Data_dt'] = pd.to_datetime(df_view['Data'], errors='coerce')
-                        df_view = df_view[df_view['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
-                    if search:
-                        df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
-
                     ed = st.data_editor(df_view, use_container_width=True, key=f"ed_{key}", column_config=column_cfg_main)
                     edit_trackers[f"ed_{key}"] = (df_view, ed)
 
@@ -248,13 +192,9 @@ if check_password():
                     if real_idx in final_df.index:
                         for col, val in col_ch.items():
                             final_df.at[real_idx, col] = val
-                            
-                            # Logika dla zakładki Puste: zmiana statusu auta wszędzie
                             if k == "ed_empty" and col == "STATUS":
                                 truck_id = orig_df_part.iloc[int(r_idx_str)]['Auto']
                                 final_df.loc[final_df['Auto'] == truck_id, 'STATUS'] = val
-                            
-                            # Logika dla Empties Slots: autouzupełnianie auta/kierowcy
                             if k == "ed_empties_slots" and col == "Przewoźnik":
                                 if val in ["", "--- BRAK ---"]:
                                     final_df.at[real_idx, "Auto"] = ""; final_df.at[real_idx, "Kierowca"] = ""
@@ -264,7 +204,6 @@ if check_password():
                                         final_df.at[real_idx, "Auto"] = match.iloc[0]['Auto']
                                         final_df.at[real_idx, "Kierowca"] = match.iloc[0]['Kierowca']
 
-            if "PODGLĄD" in final_df.columns: final_df = final_df.drop(columns=["PODGLĄD"])
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear(); st.success("Zmiany zapisane!"); st.rerun()
 
