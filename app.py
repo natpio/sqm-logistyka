@@ -46,20 +46,6 @@ if check_password():
             justify-content: space-between;
             align-items: center;
         }
-        .transport-card {
-            background-color: #ffffff;
-            border: 1px solid #e0e0e0;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
-            border-left: 8px solid #ccc;
-        }
-        .status-trasie { border-left-color: #ffeb3b; }
-        .status-rampa { border-left-color: #f44336; }
-        .status-rozladowany { border-left-color: #4caf50; }
-        .status-empties { border-left-color: #9e9e9e; }
-        .status-zaladowany { border-left-color: #2196f3; }
-        .status-pusty { border-left-color: #ffffff; border-left-style: dashed; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -68,7 +54,6 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Wczytujemy dane i resetujemy indeks, aby mieć czystą bazę do mapowania
         raw_df = conn.read(spreadsheet=URL, ttl="10s").dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
@@ -77,20 +62,13 @@ if check_password():
             if col not in df.columns: df[col] = ""
             df[col] = df[col].astype(str).replace('nan', '')
 
-        # FIX dla błędu "ColumnDataKind.FLOAT":
-        # Tworzymy kolumnę PODGLĄD jako typ bool, co rozwiązuje błąd widoczny na screenie
         df["PODGLĄD"] = False
-        # Dodajemy kolumnę USUŃ (techniczną), aby móc usuwać wiersze
-        df.insert(0, "USUŃ", False)
+        # Zamiast kolumny USUŃ na początku, dodajemy ją później, by LP było pierwsze
 
         # --- 5. SIDEBAR ---
         with st.sidebar:
             st.header("⚙️ Ustawienia")
             view_mode = st.radio("Zmień widok:", ["Tradycyjny", "Kafelkowy"])
-            if view_mode == "Kafelkowy":
-                st.divider()
-                f_hala = st.multiselect("Hala:", options=sorted(df['Hala'].unique()))
-                f_status = st.multiselect("Status:", options=sorted(df['STATUS'].unique()))
             st.divider()
             if st.button("Wyloguj"):
                 controller.remove("sqm_login_key")
@@ -119,27 +97,24 @@ if check_password():
 
                 df_view = df[mask].copy() if mask is not None else df.copy()
 
-                # Filtrowanie daty i szukanie
+                # Filtrowanie i wyszukiwanie
                 if key != "empty":
-                    c1, c2, c3 = st.columns([1.5, 2, 1])
+                    c1, c2 = st.columns([1, 2])
                     with c1:
                         d_val = st.date_input("Dzień:", value=datetime.now(), key=f"d_{key}")
                         all_d = st.checkbox("Wszystkie dni", value=True, key=f"a_{key}")
                     with c2: search = st.text_input("🔍 Szukaj:", key=f"s_{key}")
-                    with c3:
-                        st.write("###")
-                        if st.button("🔄 Odśwież", key=f"r_{key}"):
-                            st.cache_data.clear()
-                            st.rerun()
 
-                    if not all_d:
-                        df_view = df_view[df_view['Data'] == str(d_val)]
-                    if search:
-                        df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
+                    if not all_d: df_view = df_view[df_view['Data'] == str(d_val)]
+                    if search: df_view = df_view[df_view.apply(lambda r: r.astype(str).str.contains(search, case=False).any(), axis=1)]
 
-                # Wyświetlanie danych
+                # DODAWANIE NUMERACJI I KOLUMNY USUŃ
+                df_view.insert(0, "LP", range(1, len(df_view) + 1)) # Numeracja od 1
+                df_view.insert(1, "USUŃ", False)
+
                 if view_mode == "Tradycyjny":
                     column_cfg = {
+                        "LP": st.column_config.NumberColumn("LP", width="small", disabled=True),
                         "USUŃ": st.column_config.CheckboxColumn("🗑️", width="small"),
                         "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
                         "STATUS": st.column_config.SelectboxColumn("STATUS", options=["🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", "🚚 ZAŁADOWANY", "⚪ PUSTE"], width="medium"),
@@ -151,20 +126,20 @@ if check_password():
                     ed = st.data_editor(df_view, use_container_width=True, hide_index=True, key=f"ed_{key}", column_config=column_cfg)
                     edit_trackers[f"ed_{key}"] = (df_view, ed)
                     
-                    if not ed[ed["PODGLĄD"] == True].empty:
-                        row = ed[ed["PODGLĄD"] == True].iloc[-1]
+                    sel = ed[ed["PODGLĄD"] == True]
+                    if not sel.empty:
+                        row = sel.iloc[-1]
                         st.info(f"**Notatka:** {row['NOTATKA']}")
                 else:
-                    st.warning("Widok kafelkowy nie obsługuje edycji. Przełącz na Tradycyjny, aby zapisać zmiany.")
+                    st.warning("Widok kafelkowy nie obsługuje edycji.")
 
-        # --- 8. GLOBALNY ZAPIS I USUWANIE (Fix błędu out of bounds) ---
+        # --- 8. GLOBALNY ZAPIS I USUWANIE ---
         st.divider()
         if st.button("💾 ZAPISZ ZMIANY / USUŃ ZAZNACZONE", type="primary", use_container_width=True):
             final_df = df.copy()
             rows_to_delete = []
 
             for k, (orig_df_part, ed_df) in edit_trackers.items():
-                # Streamlit session state przechowuje tylko zmiany
                 changes = st.session_state[k].get("edited_rows", {})
                 
                 for r_idx_str, col_ch in changes.items():
@@ -175,20 +150,18 @@ if check_password():
                         rows_to_delete.append(real_idx)
                     else:
                         for col, val in col_ch.items():
-                            if col not in ["USUŃ", "PODGLĄD"]:
+                            if col not in ["LP", "USUŃ", "PODGLĄD"]:
                                 final_df.at[real_idx, col] = val
             
-            # Usuwamy zaznaczone wiersze
-            if rows_to_delete:
-                final_df = final_df.drop(rows_to_delete)
+            if rows_to_delete: final_df = final_df.drop(rows_to_delete)
             
-            # Czyścimy kolumny techniczne przed zapisem do GSheets
-            cols_to_drop = [c for c in ["USUŃ", "PODGLĄD"] if c in final_df.columns]
-            final_df = final_df.drop(columns=cols_to_drop)
+            # Usuwamy wszystkie kolumny techniczne przed zapisem do Sheets
+            cols_to_drop = ["LP", "USUŃ", "PODGLĄD"]
+            final_df = final_df.drop(columns=[c for c in cols_to_drop if c in final_df.columns])
             
             conn.update(spreadsheet=URL, data=final_df)
             st.cache_data.clear()
-            st.success(f"Pomyślnie zaktualizowano bazę! (Usunięto: {len(rows_to_delete)})")
+            st.success(f"Baza zaktualizowana! Usunięto: {len(rows_to_delete)}")
             time.sleep(1)
             st.rerun()
 
