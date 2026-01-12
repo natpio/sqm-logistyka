@@ -119,13 +119,12 @@ if check_password():
                 all_d = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c3: search_in = st.text_input("🔍 Szukaj projektu:", key="s_in")
 
-            # Maska wykluczająca rozładowane, puste, nowe statusy empties i rekordy "projektowe" Empties
             mask_in = (
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
                 (~df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)) &
                 (~df['Nr Proj.'].str.contains("EMPTIES", na=False, case=False)) &
-                (df['Auto'] != "") # Ukrywa wiersze bez przypisanego auta
+                (df['Auto'] != "")
             )
             df_in = df[mask_in].copy()
 
@@ -148,7 +147,6 @@ if check_password():
         # --- ZAKŁADKA 3: PUSTE TRUCKI ---
         with tabs[2]:
             st.info("Pojazdy gotowe do planowania (Status: PUSTY / EMPTIES)")
-            # FILTR: Musi być status wolny ORAZ wypełnione pole Auto (usuwa widmo z samej góry)
             mask_empty = (df['STATUS'].str.contains(statusy_wolne, na=False, case=False)) & (df['Auto'] != "")
             df_empty = df[mask_empty].copy()
             
@@ -188,11 +186,17 @@ if check_password():
                             "Przewoźnik": f_c, "Auto": match['Auto'], "Kierowca": match['Kierowca'],
                             "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES"
                         }
-                        conn.update(spreadsheet=URL, data=pd.concat([df, pd.DataFrame([new_row])], ignore_index=True))
-                        st.cache_data.clear(); st.rerun()
+                        # Tworzymy pełny wiersz ze wszystkimi kolumnami, aby Sheets nie wywalał błędu
+                        row_full = {col: new_row.get(col, "") for col in all_cols}
+                        new_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
+                        
+                        # Usunięcie kolumny PODGLĄD przed zapisem
+                        if "PODGLĄD" in new_df.columns: new_df = new_df.drop(columns=["PODGLĄD"])
+                        
+                        conn.update(spreadsheet=URL, data=new_df)
+                        st.cache_data.clear(); st.success("Slot dodany!"); st.rerun()
 
             st.divider()
-            # Tabela dolna - tylko aktywne sloty empties, bez pustych "widm"
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[df_sl['Auto'] != ""] 
             
@@ -213,22 +217,28 @@ if check_password():
             if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
                 for k, (orig, ed) in edit_trackers.items():
-                    ch = st.session_state[k].get("edited_rows", {})
-                    if k == "ed_empty":
-                        for r, c in ch.items():
-                            if "STATUS" in c:
-                                auto_val = orig.iloc[int(r)]['Auto']
-                                final_df.loc[final_df['Auto'] == auto_val, 'STATUS'] = c["STATUS"]
-                    else:
-                        for r, c in ch.items():
-                            for col, val in c.items():
-                                final_df.at[orig.index[int(r)], col] = val
+                    # Sprawdzamy czy w danym edytorze zaszły jakiekolwiek zmiany
+                    if k in st.session_state:
+                        ch = st.session_state[k].get("edited_rows", {})
+                        if k == "ed_empty":
+                            for r, c in ch.items():
+                                if "STATUS" in c:
+                                    auto_val = orig.iloc[int(r)]['Auto']
+                                    final_df.loc[final_df['Auto'] == auto_val, 'STATUS'] = c["STATUS"]
+                        else:
+                            for r, c in ch.items():
+                                for col, val in c.items():
+                                    final_df.at[orig.index[int(r)], col] = val
                 
-                # Usuwamy techniczny PODGLĄD przed wysyłką do Sheets
+                # Oczyszczenie przed wysyłką do Google Sheets
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
+                
+                # Zapewnienie, że kolumny są w tej samej kolejności co w Sheets
+                to_save = to_save[all_cols]
+                
                 conn.update(spreadsheet=URL, data=to_save)
-                st.cache_data.clear(); st.success("Zapisano!"); st.rerun()
+                st.cache_data.clear(); st.success("Zapisano pomyślnie!"); st.rerun()
 
     except Exception as e:
-        st.error(f"Błąd krytyczny: {e}")
+        st.error(f"Wystąpił błąd: {e}")
