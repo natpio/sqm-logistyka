@@ -48,9 +48,10 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Odczyt i usuwanie wierszy całkowicie pustych w arkuszu
-        raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
-        df = raw_df.reset_index(drop=True)
+        # Odczyt danych
+        raw_df = conn.read(spreadsheet=URL, ttl="1m")
+        # Usuwamy tylko te wiersze, które są całkowicie puste we wszystkich kluczowych kolumnach
+        df = raw_df.dropna(subset=['Nr Proj.', 'STATUS'], how='all').reset_index(drop=True)
         
         all_cols = [
             'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 
@@ -62,9 +63,9 @@ if check_password():
             if col not in df.columns:
                 df[col] = ""
             if col != "PODGLĄD":
-                df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan'], '')
+                df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>'], '')
 
-        # POPRAWKA PODGLĄD: Wymuszenie typu bool (naprawia błąd ColumnDataKind.FLOAT)
+        # Obsługa kolumny PODGLĄD
         if "PODGLĄD" not in df.columns:
             df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
         else:
@@ -119,13 +120,13 @@ if check_password():
                 all_d = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c3: search_in = st.text_input("🔍 Szukaj projektu:", key="s_in")
 
-            # Maska: Ukrywamy rozładowane i puste, ale zostawiamy te, które mają Nr Slotu lub Auto
+            # POPRAWIONA MASKA: Wiersz zostaje, jeśli ma numer projektu, nawet gdy Auto i Slot są puste
             mask_in = (
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
                 (~df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)) &
                 (~df['Nr Proj.'].str.contains("EMPTIES", na=False, case=False)) &
-                ((df['Auto'] != "") | (df['Nr Slotu'] != ""))
+                (df['Nr Proj.'] != "") # Wystarczy numer projektu, by wiersz widniał w montażach
             )
             df_in = df[mask_in].copy()
 
@@ -185,7 +186,6 @@ if check_password():
                     f_st = st.selectbox("STATUS", ["ODBIERA EMPTIES", "ZAVOZI EMPTIES", "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK"])
                 
                 if st.form_submit_button("DODAJ SLOT", use_container_width=True):
-                    # Przygotowanie danych auta (jeśli wybrano przewoźnika)
                     auto_val, kier_val = "", ""
                     curr_carr = f_c
                     if f_c != "-- Brak / Nowy --":
@@ -200,7 +200,6 @@ if check_password():
                         "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES"
                     }
                     
-                    # Pełna struktura wiersza dla GSheets
                     row_full = {col: new_row_data.get(col, "") for col in all_cols}
                     save_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
                     
@@ -210,7 +209,6 @@ if check_password():
                     st.cache_data.clear(); st.success("Slot zarezerwowany!"); st.rerun()
 
             st.divider()
-            # Tabela dolna: Pokazuje sloty jeśli mają Status Empties ORAZ (Auto lub Nr Slotu)
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
