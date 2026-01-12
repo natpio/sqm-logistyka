@@ -48,7 +48,7 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Odczyt i usuwanie wierszy całkowicie pustych
+        # Odczyt i usuwanie wierszy całkowicie pustych w arkuszu
         raw_df = conn.read(spreadsheet=URL, ttl="1m").dropna(how="all")
         df = raw_df.reset_index(drop=True)
         
@@ -119,12 +119,13 @@ if check_password():
                 all_d = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c3: search_in = st.text_input("🔍 Szukaj projektu:", key="s_in")
 
+            # Maska: Ukrywamy rozładowane i puste, ale zostawiamy te, które mają Nr Slotu lub Auto
             mask_in = (
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
                 (~df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)) &
                 (~df['Nr Proj.'].str.contains("EMPTIES", na=False, case=False)) &
-                (df['Auto'] != "")
+                ((df['Auto'] != "") | (df['Nr Slotu'] != ""))
             )
             df_in = df[mask_in].copy()
 
@@ -169,36 +170,49 @@ if check_password():
         with tabs[3]:
             st.subheader("➕ Zaplanuj slot")
             df_puste_form = df[(df['STATUS'].str.contains(statusy_wolne, na=False, case=False)) & (df['Auto'] != "")]
+            lista_przew = sorted(df_puste_form['Przewoźnik'].unique()) if not df_puste_form.empty else []
             
             with st.form("form_emp"):
                 c1, c2, c3 = st.columns(3)
-                with c1: f_d, f_s = st.date_input("DATA"), st.text_input("NR SLOTU")
-                with c2: f_g, f_h = st.text_input("GODZINA"), st.selectbox("HALA", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
+                with c1: 
+                    f_d = st.date_input("DATA")
+                    f_s = st.text_input("NR SLOTU")
+                with c2: 
+                    f_g = st.text_input("GODZINA")
+                    f_h = st.selectbox("HALA", ["HALA 1", "HALA 2", "HALA 3", "HALA 4", "HALA 5"])
                 with c3: 
-                    f_c = st.selectbox("PRZEWOŹNIK", sorted(df_puste_form['Przewoźnik'].unique()) if not df_puste_form.empty else ["Brak"])
+                    f_c = st.selectbox("PRZEWOŹNIK (Opcjonalnie)", ["-- Brak / Nowy --"] + lista_przew)
                     f_st = st.selectbox("STATUS", ["ODBIERA EMPTIES", "ZAVOZI EMPTIES", "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK"])
                 
                 if st.form_submit_button("DODAJ SLOT", use_container_width=True):
-                    if not df_puste_form.empty and f_c != "Brak":
+                    # Przygotowanie danych auta (jeśli wybrano przewoźnika)
+                    auto_val, kier_val = "", ""
+                    curr_carr = f_c
+                    if f_c != "-- Brak / Nowy --":
                         match = df_puste_form[df_puste_form['Przewoźnik'] == f_c].iloc[0]
-                        new_row = {
-                            "Data": str(f_d), "Nr Slotu": f_s, "Godzina": f_g, "Hala": f_h,
-                            "Przewoźnik": f_c, "Auto": match['Auto'], "Kierowca": match['Kierowca'],
-                            "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES"
-                        }
-                        # Tworzymy pełny wiersz ze wszystkimi kolumnami, aby Sheets nie wywalał błędu
-                        row_full = {col: new_row.get(col, "") for col in all_cols}
-                        new_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
-                        
-                        # Usunięcie kolumny PODGLĄD przed zapisem
-                        if "PODGLĄD" in new_df.columns: new_df = new_df.drop(columns=["PODGLĄD"])
-                        
-                        conn.update(spreadsheet=URL, data=new_df)
-                        st.cache_data.clear(); st.success("Slot dodany!"); st.rerun()
+                        auto_val, kier_val = match['Auto'], match['Kierowca']
+                    else:
+                        curr_carr = ""
+
+                    new_row_data = {
+                        "Data": str(f_d), "Nr Slotu": f_s, "Godzina": f_g, "Hala": f_h,
+                        "Przewoźnik": curr_carr, "Auto": auto_val, "Kierowca": kier_val,
+                        "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES"
+                    }
+                    
+                    # Pełna struktura wiersza dla GSheets
+                    row_full = {col: new_row_data.get(col, "") for col in all_cols}
+                    save_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
+                    
+                    if "PODGLĄD" in save_df.columns: save_df = save_df.drop(columns=["PODGLĄD"])
+                    
+                    conn.update(spreadsheet=URL, data=save_df[all_cols])
+                    st.cache_data.clear(); st.success("Slot zarezerwowany!"); st.rerun()
 
             st.divider()
+            # Tabela dolna: Pokazuje sloty jeśli mają Status Empties ORAZ (Auto lub Nr Slotu)
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
-            df_sl = df_sl[df_sl['Auto'] != ""] 
+            df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
             ed_sl = st.data_editor(
                 df_sl[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA']], 
@@ -214,31 +228,26 @@ if check_password():
         # --- 8. GLOBALNY ZAPIS ---
         if edit_trackers:
             st.divider()
-            if st.button("💾 ZAPISZ ZMIANY", type="primary", use_container_width=True):
+            if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
                 for k, (orig, ed) in edit_trackers.items():
-                    # Sprawdzamy czy w danym edytorze zaszły jakiekolwiek zmiany
                     if k in st.session_state:
                         ch = st.session_state[k].get("edited_rows", {})
                         if k == "ed_empty":
                             for r, c in ch.items():
                                 if "STATUS" in c:
-                                    auto_val = orig.iloc[int(r)]['Auto']
-                                    final_df.loc[final_df['Auto'] == auto_val, 'STATUS'] = c["STATUS"]
+                                    a_id = orig.iloc[int(r)]['Auto']
+                                    final_df.loc[final_df['Auto'] == a_id, 'STATUS'] = c["STATUS"]
                         else:
                             for r, c in ch.items():
+                                real_idx = orig.index[int(r)]
                                 for col, val in c.items():
-                                    final_df.at[orig.index[int(r)], col] = val
+                                    final_df.at[real_idx, col] = val
                 
-                # Oczyszczenie przed wysyłką do Google Sheets
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
-                
-                # Zapewnienie, że kolumny są w tej samej kolejności co w Sheets
-                to_save = to_save[all_cols]
-                
-                conn.update(spreadsheet=URL, data=to_save)
-                st.cache_data.clear(); st.success("Zapisano pomyślnie!"); st.rerun()
+                conn.update(spreadsheet=URL, data=to_save[all_cols])
+                st.cache_data.clear(); st.success("Zmiany zapisane w arkuszu!"); st.rerun()
 
     except Exception as e:
-        st.error(f"Wystąpił błąd: {e}")
+        st.error(f"Wystąpił błąd podczas przetwarzania danych: {e}")
