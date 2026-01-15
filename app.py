@@ -40,6 +40,7 @@ if check_password():
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [data-baseweb="tab-list"] { gap: 10px; }
+        .note-box { background-color: #fff3cd; border-left: 5px solid #ffa000; padding: 10px; border-radius: 5px; margin: 10px 0; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -48,7 +49,6 @@ if check_password():
     conn = st.connection("gsheets", type=GSheetsConnection)
 
     try:
-        # Odczyt danych i usunięcie tylko całkowicie pustych wierszy
         raw_df = conn.read(spreadsheet=URL, ttl="1m")
         df = raw_df.dropna(how="all").reset_index(drop=True)
         
@@ -58,16 +58,15 @@ if check_password():
             'zrzut z currenta', 'SLOT', 'dodatkowe zdjęcie', 'NOTATKA'
         ]
         
-        # Standaryzacja kolumn i czyszczenie wartości niepożądanych
         for col in all_cols:
             if col not in df.columns:
                 df[col] = ""
             if col != "PODGLĄD":
                 df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
 
-        # Naprawa kolumny PODGLĄD (Checkbox)
+        # Naprawa kolumny PODGLĄD (Checkbox) - globalna inicjalizacja
         if "PODGLĄD" not in df.columns:
-            df.insert(df.columns.get_loc("NOTATKA"), "PODGLĄD", False)
+            df.insert(0, "PODGLĄD", False)
         else:
             df["PODGLĄD"] = pd.to_numeric(df["PODGLĄD"], errors='coerce').fillna(0).map(lambda x: True if x == 1 or x is True else False)
 
@@ -93,7 +92,7 @@ if check_password():
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.TextColumn("📝 NOTATKA")
+            "NOTATKA": st.column_config.LinkColumn("📝 NOTATKA", width="large") # Zmieniono na LinkColumn dla wykrywania linków
         }
 
         # --- 6. METRYKI ---
@@ -121,7 +120,6 @@ if check_password():
                 all_d = st.checkbox("Wszystkie dni", value=False, key="a_in")
             with c3: search_in = st.text_input("🔍 Szukaj projektu:", key="s_in")
 
-            # POPRAWIONA MASKA: Wiersz zostaje, jeśli ma numer projektu (nawet bez slotu/auta)
             mask_in = (
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
@@ -139,6 +137,11 @@ if check_password():
 
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_in"] = (df_in, ed_in)
+            
+            # Podgląd notatek dla Montaży
+            selected_notes = ed_in[ed_in["PODGLĄD"] == True]
+            for _, row in selected_notes.iterrows():
+                st.info(f"**Notatka ({row['Nr Proj.']} - {row['Nazwa Projektu']}):**\n\n{row['NOTATKA']}")
 
         # --- ZAKŁADKA 2: ROZŁADOWANE ---
         with tabs[1]:
@@ -189,14 +192,15 @@ if check_password():
                 if st.form_submit_button("DODAJ SLOT", use_container_width=True):
                     auto_val, kier_val = "", ""
                     curr_carr = f_c if f_c != "-- Brak / Nowy --" else ""
-                    if curr_carr:
+                    if curr_carr and not df_puste_form[df_puste_form['Przewoźnik'] == f_c].empty:
                         match = df_puste_form[df_puste_form['Przewoźnik'] == f_c].iloc[0]
                         auto_val, kier_val = match['Auto'], match['Kierowca']
 
                     new_row_data = {
                         "Data": str(f_d), "Nr Slotu": f_s, "Godzina": f_g, "Hala": f_h,
                         "Przewoźnik": curr_carr, "Auto": auto_val, "Kierowca": kier_val,
-                        "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES"
+                        "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES",
+                        "PODGLĄD": False
                     }
                     
                     row_full = {col: new_row_data.get(col, "") for col in all_cols}
@@ -207,39 +211,43 @@ if check_password():
                     st.cache_data.clear(); st.success("Slot zarezerwowany!"); st.rerun()
 
             st.divider()
+            # Widok istniejących slotów na empties
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
+            # Dodanie oka do konfiguracji wyświetlania
             ed_sl = st.data_editor(
-                df_sl[['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA']], 
+                df_sl[['PODGLĄD', 'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA']], 
                 use_container_width=True, key="ed_sl", column_config=column_cfg, hide_index=True
             )
             edit_trackers["ed_sl"] = (df_sl, ed_sl)
+
+            # Podgląd notatek dla Empties (Oko)
+            selected_sl_notes = ed_sl[ed_sl["PODGLĄD"] == True]
+            for _, row in selected_sl_notes.iterrows():
+                st.warning(f"**Notatka (Slot: {row['Nr Slotu']} - {row['Auto']}):**\n\n{row['NOTATKA']}")
 
         # --- ZAKŁADKA 5: BAZA ---
         with tabs[4]:
             ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_full"] = (df, ed_full)
 
-        # --- 8. GLOBALNY ZAPIS (Z POPRAWKĄ INDEKSOWANIA) ---
+        # --- 8. GLOBALNY ZAPIS ---
         if edit_trackers:
             st.divider()
             if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
                 for k, (orig_df, ed_component) in edit_trackers.items():
-                    # Pobieramy zmiany bezpośrednio ze stanu sesji edytora
                     state_key = k
                     if state_key in st.session_state:
                         changes = st.session_state[state_key].get("edited_rows", {})
                         
                         if k == "ed_empty":
-                            # Logika specjalna dla grupowanych aut
                             for r_idx, c_vals in changes.items():
                                 if "STATUS" in c_vals:
                                     a_id = orig_df.iloc[int(r_idx)]['Auto']
                                     final_df.loc[final_df['Auto'] == a_id, 'STATUS'] = c_vals["STATUS"]
                         else:
-                            # Logika standardowa - bezpieczne mapowanie indeksów
                             for r_idx, c_vals in changes.items():
                                 actual_idx = orig_df.index[int(r_idx)]
                                 for col, val in c_vals.items():
@@ -248,7 +256,6 @@ if check_password():
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
                 
-                # Zapis do GSheets
                 conn.update(spreadsheet=URL, data=to_save[all_cols])
                 st.cache_data.clear()
                 st.success("Dane zsynchronizowane z arkuszem!")
