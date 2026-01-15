@@ -40,7 +40,15 @@ if check_password():
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-        .note-box { background-color: #fff3cd; border-left: 5px solid #ffa000; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .note-container { 
+            background-color: #1e1e1e; 
+            color: #ffffff; 
+            padding: 20px; 
+            border-radius: 10px; 
+            border-left: 5px solid #00ff00;
+            margin: 10px 0;
+            font-family: sans-serif;
+        }
         </style>
         """, unsafe_allow_html=True)
 
@@ -64,9 +72,11 @@ if check_password():
             if col != "PODGLĄD":
                 df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
 
-        # Naprawa kolumny PODGLĄD (Checkbox) - globalna inicjalizacja
+        # Naprawa kolumny PODGLĄD (Checkbox)
         if "PODGLĄD" not in df.columns:
-            df.insert(0, "PODGLĄD", False)
+            # Wstawiamy kolumnę bezpośrednio przed NOTATKA
+            idx = df.columns.get_loc("NOTATKA")
+            df.insert(idx, "PODGLĄD", False)
         else:
             df["PODGLĄD"] = pd.to_numeric(df["PODGLĄD"], errors='coerce').fillna(0).map(lambda x: True if x == 1 or x is True else False)
 
@@ -92,7 +102,7 @@ if check_password():
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.LinkColumn("📝 NOTATKA", width="large") # Zmieniono na LinkColumn dla wykrywania linków
+            "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
         }
 
         # --- 6. METRYKI ---
@@ -137,11 +147,10 @@ if check_password():
 
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_in"] = (df_in, ed_in)
-            
-            # Podgląd notatek dla Montaży
-            selected_notes = ed_in[ed_in["PODGLĄD"] == True]
-            for _, row in selected_notes.iterrows():
-                st.info(f"**Notatka ({row['Nr Proj.']} - {row['Nazwa Projektu']}):**\n\n{row['NOTATKA']}")
+
+            # Widok notatek dla MONTAŻE
+            for _, row in ed_in[ed_in["PODGLĄD"] == True].iterrows():
+                st.markdown(f"""<div class='note-container'><b>PROJEKT: {row['Nr Proj.']}</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
 
         # --- ZAKŁADKA 2: ROZŁADOWANE ---
         with tabs[1]:
@@ -211,21 +220,20 @@ if check_password():
                     st.cache_data.clear(); st.success("Slot zarezerwowany!"); st.rerun()
 
             st.divider()
-            # Widok istniejących slotów na empties
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
-            # Dodanie oka do konfiguracji wyświetlania
+            # Edytor z okiem obok notatki na końcu
+            cols_to_show = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'PODGLĄD', 'NOTATKA']
             ed_sl = st.data_editor(
-                df_sl[['PODGLĄD', 'Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'NOTATKA']], 
+                df_sl[cols_to_show], 
                 use_container_width=True, key="ed_sl", column_config=column_cfg, hide_index=True
             )
             edit_trackers["ed_sl"] = (df_sl, ed_sl)
 
-            # Podgląd notatek dla Empties (Oko)
-            selected_sl_notes = ed_sl[ed_sl["PODGLĄD"] == True]
-            for _, row in selected_sl_notes.iterrows():
-                st.warning(f"**Notatka (Slot: {row['Nr Slotu']} - {row['Auto']}):**\n\n{row['NOTATKA']}")
+            # Widok notatek dla SLOTY NA EMPTIES
+            for _, row in ed_sl[ed_sl["PODGLĄD"] == True].iterrows():
+                st.markdown(f"""<div class='note-container'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
 
         # --- ZAKŁADKA 5: BAZA ---
         with tabs[4]:
