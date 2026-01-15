@@ -48,6 +48,7 @@ if check_password():
             border-left: 5px solid #00ff00;
             margin: 10px 0;
             font-family: sans-serif;
+            white-space: pre-wrap;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -74,7 +75,6 @@ if check_password():
 
         # Naprawa kolumny PODGLĄD (Checkbox)
         if "PODGLĄD" not in df.columns:
-            # Wstawiamy kolumnę bezpośrednio przed NOTATKA
             idx = df.columns.get_loc("NOTATKA")
             df.insert(idx, "PODGLĄD", False)
         else:
@@ -91,7 +91,7 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracja wyświetlania kolumn
+        # Konfiguracja wyświetlania kolumn (Przywrócone wcześniejsze formatowanie)
         column_cfg = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
                 "🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", 
@@ -102,7 +102,7 @@ if check_password():
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
+            "NOTATKA": st.column_config.LinkColumn("📝 NOTATKA", width="large") # Powrót do LinkColumn
         }
 
         # --- 6. METRYKI ---
@@ -148,7 +148,7 @@ if check_password():
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_in"] = (df_in, ed_in)
 
-            # Widok notatek dla MONTAŻE
+            # Widok podglądu notatek
             for _, row in ed_in[ed_in["PODGLĄD"] == True].iterrows():
                 st.markdown(f"""<div class='note-container'><b>PROJEKT: {row['Nr Proj.']}</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
 
@@ -223,15 +223,15 @@ if check_password():
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
-            # Edytor z okiem obok notatki na końcu
-            cols_to_show = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'PODGLĄD', 'NOTATKA']
+            # OKO i NOTATKA obok siebie
+            cols_sl = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'PODGLĄD', 'NOTATKA']
             ed_sl = st.data_editor(
-                df_sl[cols_to_show], 
+                df_sl[cols_sl], 
                 use_container_width=True, key="ed_sl", column_config=column_cfg, hide_index=True
             )
             edit_trackers["ed_sl"] = (df_sl, ed_sl)
 
-            # Widok notatek dla SLOTY NA EMPTIES
+            # Podgląd notatek dla SLOTÓW
             for _, row in ed_sl[ed_sl["PODGLĄD"] == True].iterrows():
                 st.markdown(f"""<div class='note-container'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
 
