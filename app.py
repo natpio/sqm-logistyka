@@ -40,15 +40,14 @@ if check_password():
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-        .note-container { 
-            background-color: #1e1e1e; 
-            color: #ffffff; 
-            padding: 20px; 
-            border-radius: 10px; 
+        /* Styl dla czarnego boxa notatki */
+        .note-box {
+            background-color: #1e1e1e;
+            color: #ffffff;
+            padding: 15px;
+            border-radius: 10px;
             border-left: 5px solid #00ff00;
-            margin: 10px 0;
-            font-family: sans-serif;
-            white-space: pre-wrap;
+            margin-bottom: 20px;
         }
         </style>
         """, unsafe_allow_html=True)
@@ -73,7 +72,7 @@ if check_password():
             if col != "PODGLĄD":
                 df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
 
-        # Naprawa kolumny PODGLĄD (Checkbox)
+        # Inicjalizacja kolumny PODGLĄD obok NOTATKI
         if "PODGLĄD" not in df.columns:
             idx = df.columns.get_loc("NOTATKA")
             df.insert(idx, "PODGLĄD", False)
@@ -91,7 +90,7 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracja wyświetlania kolumn (Przywrócone wcześniejsze formatowanie)
+        # Konfiguracja wyświetlania kolumn
         column_cfg = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
                 "🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", 
@@ -102,7 +101,7 @@ if check_password():
             "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
             "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.LinkColumn("📝 NOTATKA", width="large") # Powrót do LinkColumn
+            "NOTATKA": st.column_config.LinkColumn("📝 NOTATKA", width="large")
         }
 
         # --- 6. METRYKI ---
@@ -148,9 +147,10 @@ if check_password():
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_in"] = (df_in, ed_in)
 
-            # Widok podglądu notatek
+            # Podgląd notatek z aktywnymi linkami
             for _, row in ed_in[ed_in["PODGLĄD"] == True].iterrows():
-                st.markdown(f"""<div class='note-container'><b>PROJEKT: {row['Nr Proj.']}</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
+                st.markdown(f"<div class='note-box'><b>PROJEKT: {row['Nr Proj.']}</b></div>", unsafe_allow_html=True)
+                st.info(row['NOTATKA'])
 
         # --- ZAKŁADKA 2: ROZŁADOWANE ---
         with tabs[1]:
@@ -223,7 +223,7 @@ if check_password():
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
-            # OKO i NOTATKA obok siebie
+            # Oko obok notatki
             cols_sl = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'PODGLĄD', 'NOTATKA']
             ed_sl = st.data_editor(
                 df_sl[cols_sl], 
@@ -231,9 +231,10 @@ if check_password():
             )
             edit_trackers["ed_sl"] = (df_sl, ed_sl)
 
-            # Podgląd notatek dla SLOTÓW
+            # Podgląd notatek dla slotów z klikalnymi linkami
             for _, row in ed_sl[ed_sl["PODGLĄD"] == True].iterrows():
-                st.markdown(f"""<div class='note-container'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b><br>{row['NOTATKA']}</div>""", unsafe_allow_html=True)
+                st.markdown(f"<div class='note-box'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b></div>", unsafe_allow_html=True)
+                st.info(row['NOTATKA']) # Tu linki będą aktywne i klikalne
 
         # --- ZAKŁADKA 5: BAZA ---
         with tabs[4]:
