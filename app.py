@@ -108,16 +108,16 @@ if check_password():
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        # --- 7. NAWIGACJA (ZAMIAST TABS) ---
-        menu_options = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"]
+        # --- 7. NAWIGACJA (RADIO UDAJĄCE ZAKŁADKI) ---
+        menu_options = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "🛠️ DEMONTAŻE", "📚 BAZA"]
         
-        # Radio udające zakładki - klucz 'main_nav' zapewnia pamięć wyboru
         choice = st.radio("Widok:", menu_options, horizontal=True, key="main_nav")
         st.divider()
 
         statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
         statusy_wolne = "PUSTY|📦 EMPTIES"
         statusy_nowe_empties = "ODBIERA EMPTIES|ZAVOZI EMPTIES|ODBIERA PEŁNE|POWRÓT DO KOMORNIK"
+        statusy_demontaze = "DO ZAPLANOWANIA|PUSTE DOSTARCZONE|PEŁNE ODEBRANE"
 
         edit_trackers = {}
 
@@ -134,6 +134,7 @@ if check_password():
                 (~df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)) & 
                 (~df['STATUS'].str.contains("PUSTY", na=False, case=False)) & 
                 (~df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)) &
+                (~df['STATUS'].str.contains(statusy_demontaze, na=False, case=False)) &
                 (~df['Nr Proj.'].str.contains("EMPTIES", na=False, case=False)) &
                 (df['Nr Proj.'] != "")
             )
@@ -230,6 +231,47 @@ if check_password():
                 st.markdown(f"<div class='note-box'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b></div>", unsafe_allow_html=True)
                 st.info(row['NOTATKA'])
 
+        # --- SEKTYCJA: DEMONTAŻE ---
+        elif choice == "🛠️ DEMONTAŻE":
+            st.subheader("🚛 Harmonogram Demontaży")
+            
+            # Pobieramy wszystkie projekty z bazy (te które nie są pustymi slotami na empties)
+            mask_demo = (
+                (df['Nr Proj.'] != "") & 
+                (df['Nr Proj.'] != "EMPTIES") &
+                (df['STATUS'].isin(["DO ZAPLANOWANIA", "PUSTE DOSTARCZONE", "PEŁNE ODEBRANE"]))
+            )
+            
+            # Jeśli w bazie nie ma jeszcze nic z tym statusem, możemy pokazać wszystkie projekty do wyboru
+            # ale zgodnie z Twoją prośbą filtrujemy bazę pod te konkretne statusy
+            df_demo = df[mask_demo].copy()
+            
+            # Kolejność kolumn: projekty, hale, nr slotu, data, godzina, status, transport
+            cols_demo = [
+                'Nr Proj.', 'Nazwa Projektu', 'Hala', 'Nr Slotu', 'Data', 'Godzina', 
+                'STATUS', 'Przewoźnik', 'Auto', 'Kierowca', 'PODGLĄD'
+            ]
+            
+            # Dedykowana konfiguracja dla statusów demontażu
+            demo_cfg = column_cfg.copy()
+            demo_cfg["STATUS"] = st.column_config.SelectboxColumn(
+                "STATUS", 
+                options=["DO ZAPLANOWANIA", "PUSTE DOSTARCZONE", "PEŁNE ODEBRANE"],
+                width="medium"
+            )
+            
+            if df_demo.empty:
+                st.warning("Brak projektów o statusie demontażowym w bazie. Możesz je zmienić w zakładce BAZA lub MONTAŻE.")
+            
+            ed_demo = st.data_editor(
+                df_demo[cols_demo],
+                use_container_width=True,
+                key="ed_demo",
+                column_config=demo_cfg,
+                hide_index=True
+            )
+            edit_trackers["ed_demo"] = (df_demo, ed_demo)
+
         # --- SEKTYCJA: BAZA ---
         elif choice == "📚 BAZA":
             ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg, hide_index=True)
@@ -242,7 +284,9 @@ if check_password():
                 final_df = df.copy()
                 for k, (orig_df, ed_component) in edit_trackers.items():
                     if k in st.session_state:
+                        # Pobieramy zmiany z komponentu data_editor
                         changes = st.session_state[k].get("edited_rows", {})
+                        
                         if k == "ed_empty":
                             for r_idx, c_vals in changes.items():
                                 if "STATUS" in c_vals:
@@ -250,16 +294,20 @@ if check_password():
                                     final_df.loc[final_df['Auto'] == a_id, 'STATUS'] = c_vals["STATUS"]
                         else:
                             for r_idx, c_vals in changes.items():
+                                # Znajdujemy prawdziwy indeks w oryginalnym dataframe
                                 actual_idx = orig_df.index[int(r_idx)]
                                 for col, val in c_vals.items():
                                     final_df.at[actual_idx, col] = val
                 
+                # Przygotowanie do zapisu do Google Sheets
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
+                
+                # Zapisujemy tylko zdefiniowane kolumny w odpowiedniej kolejności
                 conn.update(spreadsheet=URL, data=to_save[all_cols])
                 st.cache_data.clear()
-                st.success("Dane zsynchronizowane!")
+                st.success("Dane zsynchronizowane pomyślnie!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Krytyczny błąd: {e}")
+        st.error(f"Krytyczny błąd aplikacji: {e}")
