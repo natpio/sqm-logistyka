@@ -11,7 +11,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 2. AUTORYZACJA (CIASTECZKA + HASŁO) ---
+# --- 2. AUTORYZACJA ---
 controller = CookieController()
 
 def check_password():
@@ -40,14 +40,6 @@ if check_password():
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
         .stRadio [data-testid="stWidgetLabel"] { display: none; }
-        .note-box {
-            background-color: #1e1e1e;
-            color: #ffffff;
-            padding: 15px;
-            border-radius: 10px;
-            border-left: 5px solid #00ff00;
-            margin-bottom: 20px;
-        }
         </style>
         """, unsafe_allow_html=True)
 
@@ -66,18 +58,10 @@ if check_password():
         ]
         
         for col in all_cols:
-            if col not in df.columns:
-                df[col] = ""
-            if col != "PODGLĄD":
-                df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
+            if col not in df.columns: df[col] = ""
+            df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', '<NA>'], '')
 
-        if "PODGLĄD" not in df.columns:
-            idx = df.columns.get_loc("NOTATKA")
-            df.insert(idx, "PODGLĄD", False)
-        else:
-            df["PODGLĄD"] = pd.to_numeric(df["PODGLĄD"], errors='coerce').fillna(0).map(lambda x: True if x == 1 or x is True else False)
-
-        # Baza przewoźników do Autofill i list wyboru
+        # Słownik dla Autofill (ostatnie znane dane dla przewoźnika)
         carriers_db = df[df['Przewoźnik'] != ""].groupby('Przewoźnik').agg({'Auto': 'last', 'Kierowca': 'last'}).to_dict('index')
         lista_przewoznikow = sorted(list(carriers_db.keys()))
 
@@ -99,133 +83,87 @@ if check_password():
                 "🚚 ZAŁADOWANY", "⚪ PUSTY", "ODBIERA EMPTIES", "ZAVOZI EMPTIES", 
                 "ODBIERA PEŁNE", "POWRÓT DO KOMORNIK", "DO ZAPLANOWANIA", 
                 "PUSTE DOSTARCZONE", "PEŁNE ODEBRANE"
-            ], width="medium"),
+            ]),
             "Przewoźnik": st.column_config.SelectboxColumn("Przewoźnik", options=lista_przewoznikow),
-            "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz"),
-            "zdjęcie po załadunku": st.column_config.LinkColumn("📸 Foto", display_text="Otwórz"),
             "SLOT": st.column_config.LinkColumn("⏰ SLOT", display_text="Otwórz"),
-            "PODGLĄD": st.column_config.CheckboxColumn("👁️", width="small"),
-            "NOTATKA": st.column_config.TextColumn("📝 NOTATKA", width="large")
+            "spis casów": st.column_config.LinkColumn("📋 Spis", display_text="Otwórz")
         }
 
-        # --- 6. METRYKI ---
-        st.title("🏗️ SQM Control Tower")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("W TRASIE 🟡", len(df[df['STATUS'].str.contains("TRASIE", na=False)]))
-        m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
-        m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
-
-        # --- 7. NAWIGACJA ---
-        menu_options = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "🛠️ DEMONTAŻE", "📚 BAZA"]
+        # --- 6. NAWIGACJA ---
+        menu_options = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "📦 SLOTY NA EMPTIES", "🛠️ DEMONTAŻE", "📚 BAZA"]
         choice = st.radio("Widok:", menu_options, horizontal=True, key="main_nav")
         st.divider()
 
         edit_trackers = {}
 
-        # --- SEKTYCJA: MONTAŻE ---
-        if choice == "📅 MONTAŻE":
-            mask_in = (df['Nr Proj.'] != "") & (df['Nr Proj.'] != "EMPTIES") & (~df['STATUS'].isin(["ROZŁADOWANY", "ZAŁADOWANY", "DO ZAPLANOWANIA", "PUSTE DOSTARCZONE", "PEŁNE ODEBRANE"]))
-            df_in = df[mask_in].copy()
-            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
-            edit_trackers["ed_in"] = (df_in, ed_in)
-
-        # --- SEKTYCJA: ROZŁADOWANE ---
-        elif choice == "🟢 ROZŁADOWANE":
-            df_out = df[df['STATUS'].isin(["ROZŁADOWANY", "ZAŁADOWANY"])].copy()
-            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg, hide_index=True)
-            edit_trackers["ed_out"] = (df_out, ed_out)
-
-        # --- SEKTYCJA: PUSTE TRUCKI ---
-        elif choice == "⚪ PUSTE TRUCKI":
-            st.info("Pojazdy o statusie PUSTY lub EMPTIES")
-            df_empty = df[df['STATUS'].isin(["PUSTY", "📦 EMPTIES"])].copy()
-            if not df_empty.empty:
-                df_empty_grouped = df_empty.groupby('Auto').agg({'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'last'}).reset_index()
-                ed_empty = st.data_editor(df_empty_grouped, use_container_width=True, key="ed_empty", hide_index=True)
-                edit_trackers["ed_empty"] = (df_empty_grouped, ed_empty)
-
-        # --- SEKTYCJA: SLOTY NA EMPTIES ---
-        elif choice == "📦 SLOTY NA EMPTIES":
-            df_sl = df[df['Nr Proj.'] == "EMPTIES"].copy()
-            ed_sl = st.data_editor(df_sl, use_container_width=True, key="ed_sl", column_config=column_cfg, hide_index=True)
-            edit_trackers["ed_sl"] = (df_sl, ed_sl)
-
-        # --- SEKTYCJA: DEMONTAŻE ---
-        elif choice == "🛠️ DEMONTAŻE":
-            st.subheader("🚛 Planowanie Demontaży")
+        # --- SEKTYCJA: DEMONTAŻE (Z PRZYWRÓCONĄ EDYCJĄ) ---
+        if choice == "🛠️ DEMONTAŻE":
+            st.subheader("🚛 Harmonogram Demontaży")
             search_query = st.text_input("🔍 Szukaj projektu (Nr lub Nazwa):", "").lower()
 
-            # Pobieranie unikalnych projektów
-            df_unique = df[(df['Nr Proj.'] != "") & (df['Nr Proj.'] != "EMPTIES")].drop_duplicates(subset=['Nr Proj.']).copy()
+            # Pobieramy projekty, które mają statusy demontażowe LUB są po prostu w bazie
+            df_demo = df[(df['Nr Proj.'] != "") & (df['Nr Proj.'] != "EMPTIES")].copy()
             
             if search_query:
-                df_unique = df_unique[
-                    df_unique['Nr Proj.'].str.lower().str.contains(search_query) | 
-                    df_unique['Nazwa Projektu'].str.lower().str.contains(search_query)
+                df_demo = df_demo[
+                    df_demo['Nr Proj.'].str.lower().str.contains(search_query) | 
+                    df_demo['Nazwa Projektu'].str.lower().str.contains(search_query)
                 ]
 
-            # Tworzenie czystego arkusza
-            df_demo = pd.DataFrame(columns=all_cols)
-            df_demo['Nr Proj.'] = df_unique['Nr Proj.']
-            df_demo['Nazwa Projektu'] = df_unique['Nazwa Projektu']
-            df_demo['Hala'] = df_unique['Hala']
-            df_demo = df_demo.fillna("")
-            
             cols_demo = ['Nr Proj.', 'Nazwa Projektu', 'Hala', 'Nr Slotu', 'Data', 'Godzina', 'STATUS', 'Przewoźnik', 'Auto', 'Kierowca', 'Opłata', 'SLOT', 'NOTATKA']
             
-            demo_cfg = column_cfg.copy()
-            demo_cfg["STATUS"] = st.column_config.SelectboxColumn("STATUS", options=["DO ZAPLANOWANIA", "PUSTE DOSTARCZONE", "PEŁNE ODEBRANE"])
-
-            ed_demo = st.data_editor(df_demo[cols_demo], use_container_width=True, key="ed_demo", column_config=demo_cfg, hide_index=True)
+            ed_demo = st.data_editor(df_demo[cols_demo], use_container_width=True, key="ed_demo", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_demo"] = (df_demo, ed_demo)
+
+        # --- SEKTYCJA: MONTAŻE ---
+        elif choice == "📅 MONTAŻE":
+            df_in = df[(df['Nr Proj.'] != "") & (df['Nr Proj.'] != "EMPTIES") & (~df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY|ODEBRANE", na=False))].copy()
+            ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
+            edit_trackers["ed_in"] = (df_in, ed_in)
 
         # --- SEKTYCJA: BAZA ---
         elif choice == "📚 BAZA":
             ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_full"] = (df, ed_full)
 
-        # --- 8. ZAPIS I AUTOFILL ---
+        # --- SEKTYCJE DODATKOWE ---
+        elif choice == "🟢 ROZŁADOWANE":
+            df_out = df[df['STATUS'].str.contains("ROZŁADOWANY|ZAŁADOWANY", na=False)].copy()
+            ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg, hide_index=True)
+            edit_trackers["ed_out"] = (df_out, ed_out)
+
+        elif choice == "📦 SLOTY NA EMPTIES":
+            df_sl = df[df['Nr Proj.'] == "EMPTIES"].copy()
+            ed_sl = st.data_editor(df_sl, use_container_width=True, key="ed_sl", column_config=column_cfg, hide_index=True)
+            edit_trackers["ed_sl"] = (df_sl, ed_sl)
+
+        # --- 8. ZAPIS ---
         if edit_trackers:
             st.divider()
             if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
-                
                 for k, (orig_df, ed_component) in edit_trackers.items():
                     changes = st.session_state[k].get("edited_rows", {})
-                    
-                    if k == "ed_demo":
-                        new_rows = []
-                        for r_idx, c_vals in changes.items():
-                            row_data = orig_df.iloc[int(r_idx)].to_dict()
-                            row_data.update(c_vals)
-                            
-                            # Logika AUTOFILL: Jeśli wpisano przewoźnika, a nie ma auta/kierowcy - dociągnij z bazy
-                            p_name = row_data.get('Przewoźnik')
-                            if p_name in carriers_db:
-                                if not row_data.get('Auto') or row_data.get('Auto') == "":
-                                    row_data['Auto'] = carriers_db[p_name]['Auto']
-                                if not row_data.get('Kierowca') or row_data.get('Kierowca') == "":
-                                    row_data['Kierowca'] = carriers_db[p_name]['Kierowca']
-                            
-                            new_rows.append(row_data)
+                    for r_idx, c_vals in changes.items():
+                        actual_idx = orig_df.index[int(r_idx)]
                         
-                        if new_rows:
-                            final_df = pd.concat([final_df, pd.DataFrame(new_rows)], ignore_index=True)
-                    
-                    else:
-                        for r_idx, c_vals in changes.items():
-                            actual_idx = orig_df.index[int(r_idx)]
-                            for col, val in c_vals.items():
-                                final_df.at[actual_idx, col] = val
+                        # Logika Autofill przy zapisie
+                        if 'Przewoźnik' in c_vals:
+                            p_name = c_vals['Przewoźnik']
+                            if p_name in carriers_db:
+                                # Jeśli użytkownik nie wpisał auta/kierowcy ręcznie, uzupełnij z bazy
+                                if 'Auto' not in c_vals or c_vals['Auto'] == "":
+                                    final_df.at[actual_idx, 'Auto'] = carriers_db[p_name]['Auto']
+                                if 'Kierowca' not in c_vals or c_vals['Kierowca'] == "":
+                                    final_df.at[actual_idx, 'Kierowca'] = carriers_db[p_name]['Kierowca']
+                        
+                        for col, val in c_vals.items():
+                            final_df.at[actual_idx, col] = val
 
-                # Usuwanie kolumny pomocniczej przed zapisem
-                to_save = final_df.copy()
-                if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
-                
-                conn.update(spreadsheet=URL, data=to_save[all_cols])
+                conn.update(spreadsheet=URL, data=final_df[all_cols])
                 st.cache_data.clear()
-                st.success("Zmiany zapisane! Dane transportowe zostały uzupełnione automatycznie tam, gdzie to możliwe.")
+                st.success("Zapisano!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Krytyczny błąd: {e}")
+        st.error(f"Błąd: {e}")
