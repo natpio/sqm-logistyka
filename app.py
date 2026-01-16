@@ -88,7 +88,7 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Definicja konfiguracji kolumn
+        # Konfiguracja kolumn dla data_editor
         column_cfg = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
                 "🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", 
@@ -201,17 +201,17 @@ if check_password():
         elif choice == "🛠️ DEMONTAŻE":
             st.subheader("🚛 Planowanie Demontaży")
             
-            # Pobieramy wszystkie projekty z bazy (bez względu na status)
+            # Pobieramy pełną listę projektów z bazy (bez filtracji po statusie)
             mask_demo = (df['Nr Proj.'] != "") & (df['Nr Proj.'] != "EMPTIES")
             df_demo = df[mask_demo].copy()
             
-            # Kolejność kolumn: projekty, hale, nr slotu, data, godzina, status, dane transportowe
+            # Wyświetlamy najważniejsze kolumny wg Twojej prośby
             cols_demo = [
                 'Nr Proj.', 'Nazwa Projektu', 'Hala', 'Nr Slotu', 'Data', 'Godzina', 
                 'STATUS', 'Przewoźnik', 'Auto', 'Kierowca', 'PODGLĄD'
             ]
             
-            # Dedykowana konfiguracja statusów dla tej zakładki
+            # Dedykowane statusy tylko dla tej zakładki
             demo_cfg = column_cfg.copy()
             demo_cfg["STATUS"] = st.column_config.SelectboxColumn(
                 "STATUS", 
@@ -240,7 +240,7 @@ if check_password():
                 final_df = df.copy()
                 for k, (orig_df, ed_component) in edit_trackers.items():
                     if k in st.session_state:
-                        # Pobieramy zmiany
+                        # Wykrywanie zmian w wierszach
                         changes = st.session_state[k].get("edited_rows", {})
                         
                         if k == "ed_empty":
@@ -254,13 +254,13 @@ if check_password():
                                 for col, val in c_vals.items():
                                     final_df.at[actual_idx, col] = val
                 
-                # Zapis do Google Sheets
+                # Przygotowanie i wysyłka do Google Sheets
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
                 conn.update(spreadsheet=URL, data=to_save[all_cols])
                 st.cache_data.clear()
-                st.success("Wszystkie dane zostały zapisane!")
+                st.success("Zapisano zmiany w bazie danych!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Krytyczny błąd: {e}")
+        st.error(f"Wystąpił błąd: {e}")
