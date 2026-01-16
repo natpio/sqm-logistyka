@@ -39,8 +39,7 @@ if check_password():
     st.markdown("""
         <style>
         div[data-testid="stMetric"] { background-color: #f8f9fb; border: 1px solid #e0e0e0; padding: 15px; border-radius: 10px; }
-        .stTabs [data-baseweb="tab-list"] { gap: 10px; }
-        /* Styl dla czarnego boxa notatki */
+        .stRadio [data-testid="stWidgetLabel"] { display: none; } /* Ukrywa napis 'Wybierz widok' */
         .note-box {
             background-color: #1e1e1e;
             color: #ffffff;
@@ -72,7 +71,6 @@ if check_password():
             if col != "PODGLĄD":
                 df[col] = df[col].astype(str).replace(['nan', 'None', 'NAT', 'nan nan', '<NA>', 'None None'], '')
 
-        # Inicjalizacja kolumny PODGLĄD obok NOTATKI
         if "PODGLĄD" not in df.columns:
             idx = df.columns.get_loc("NOTATKA")
             df.insert(idx, "PODGLĄD", False)
@@ -90,7 +88,6 @@ if check_password():
                 controller.remove("sqm_login_key")
                 st.rerun()
 
-        # Konfiguracja wyświetlania kolumn
         column_cfg = {
             "STATUS": st.column_config.SelectboxColumn("STATUS", options=[
                 "🟡 W TRASIE", "🔴 POD RAMPĄ", "🟢 ROZŁADOWANY", "📦 EMPTIES", 
@@ -111,17 +108,21 @@ if check_password():
         m2.metric("POD RAMPĄ 🔴", len(df[df['STATUS'].str.contains("RAMP", na=False)]))
         m3.metric("ZAKOŃCZONE 🟢", len(df[df['STATUS'].str.contains("ROZŁADOWANY", na=False)]))
 
-        # --- 7. ZAKŁADKI ---
-        tabs = st.tabs(["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"])
+        # --- 7. NAWIGACJA (ZAMIAST TABS) ---
+        menu_options = ["📅 MONTAŻE", "🟢 ROZŁADOWANE", "⚪ PUSTE TRUCKI", "📦 SLOTY NA EMPTIES", "📚 BAZA"]
         
+        # Radio udające zakładki - klucz 'main_nav' zapewnia pamięć wyboru
+        choice = st.radio("Widok:", menu_options, horizontal=True, key="main_nav")
+        st.divider()
+
         statusy_rozladowane = "ROZŁADOWANY|ZAŁADOWANY"
         statusy_wolne = "PUSTY|📦 EMPTIES"
         statusy_nowe_empties = "ODBIERA EMPTIES|ZAVOZI EMPTIES|ODBIERA PEŁNE|POWRÓT DO KOMORNIK"
 
         edit_trackers = {}
 
-        # --- ZAKŁADKA 1: MONTAŻE ---
-        with tabs[0]:
+        # --- SEKTYCJA: MONTAŻE ---
+        if choice == "📅 MONTAŻE":
             c1, c2, c3 = st.columns([1.5, 1, 2])
             with c1: d_val = st.date_input("Dzień:", value=datetime.now(), key="d_in")
             with c2: 
@@ -137,7 +138,6 @@ if check_password():
                 (df['Nr Proj.'] != "")
             )
             df_in = df[mask_in].copy()
-
             if not all_d:
                 df_in['Data_dt'] = pd.to_datetime(df_in['Data'], errors='coerce', dayfirst=True)
                 df_in = df_in[df_in['Data_dt'].dt.date == d_val].drop(columns=['Data_dt'])
@@ -147,20 +147,19 @@ if check_password():
             ed_in = st.data_editor(df_in, use_container_width=True, key="ed_in", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_in"] = (df_in, ed_in)
 
-            # Podgląd notatek z aktywnymi linkami
             for _, row in ed_in[ed_in["PODGLĄD"] == True].iterrows():
                 st.markdown(f"<div class='note-box'><b>PROJEKT: {row['Nr Proj.']}</b></div>", unsafe_allow_html=True)
                 st.info(row['NOTATKA'])
 
-        # --- ZAKŁADKA 2: ROZŁADOWANE ---
-        with tabs[1]:
+        # --- SEKTYCJA: ROZŁADOWANE ---
+        elif choice == "🟢 ROZŁADOWANE":
             mask_out = df['STATUS'].str.contains(statusy_rozladowane, na=False, case=False)
             df_out = df[mask_out].copy()
             ed_out = st.data_editor(df_out, use_container_width=True, key="ed_out", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_out"] = (df_out, ed_out)
 
-        # --- ZAKŁADKA 3: PUSTE TRUCKI ---
-        with tabs[2]:
+        # --- SEKTYCJA: PUSTE TRUCKI ---
+        elif choice == "⚪ PUSTE TRUCKI":
             st.info("Pojazdy gotowe do planowania (Status: PUSTY / EMPTIES)")
             mask_empty = (df['STATUS'].str.contains(statusy_wolne, na=False, case=False)) & (df['Auto'] != "")
             df_empty = df[mask_empty].copy()
@@ -169,7 +168,6 @@ if check_password():
                 df_empty_grouped = df_empty.groupby('Auto').agg({
                     'Przewoźnik': 'first', 'Kierowca': 'first', 'STATUS': 'first'
                 }).reset_index()
-                
                 ed_empty = st.data_editor(
                     df_empty_grouped[['Przewoźnik', 'Auto', 'Kierowca', 'STATUS']], 
                     use_container_width=True, key="ed_empty",
@@ -180,8 +178,8 @@ if check_password():
             else:
                 st.warning("Brak dostępnych pojazdów.")
 
-        # --- ZAKŁADKA 4: SLOTY NA EMPTIES ---
-        with tabs[3]:
+        # --- SEKTYCJA: SLOTY NA EMPTIES ---
+        elif choice == "📦 SLOTY NA EMPTIES":
             st.subheader("➕ Zaplanuj slot")
             df_puste_form = df[(df['STATUS'].str.contains(statusy_wolne, na=False, case=False)) & (df['Auto'] != "")]
             lista_przew = sorted(df_puste_form['Przewoźnik'].unique()) if not df_puste_form.empty else []
@@ -211,11 +209,9 @@ if check_password():
                         "STATUS": f_st, "Nr Proj.": "EMPTIES", "Nazwa Projektu": "OBSŁUGA EMPTIES",
                         "PODGLĄD": False
                     }
-                    
                     row_full = {col: new_row_data.get(col, "") for col in all_cols}
                     save_df = pd.concat([df, pd.DataFrame([row_full])], ignore_index=True)
                     if "PODGLĄD" in save_df.columns: save_df = save_df.drop(columns=["PODGLĄD"])
-                    
                     conn.update(spreadsheet=URL, data=save_df[all_cols])
                     st.cache_data.clear(); st.success("Slot zarezerwowany!"); st.rerun()
 
@@ -223,7 +219,6 @@ if check_password():
             df_sl = df[df['STATUS'].str.contains(statusy_nowe_empties, na=False, case=False)].copy()
             df_sl = df_sl[(df_sl['Auto'] != "") | (df_sl['Nr Slotu'] != "")] 
             
-            # Oko obok notatki
             cols_sl = ['Data', 'Nr Slotu', 'Godzina', 'Hala', 'Przewoźnik', 'Auto', 'Kierowca', 'STATUS', 'PODGLĄD', 'NOTATKA']
             ed_sl = st.data_editor(
                 df_sl[cols_sl], 
@@ -231,13 +226,12 @@ if check_password():
             )
             edit_trackers["ed_sl"] = (df_sl, ed_sl)
 
-            # Podgląd notatek dla slotów z klikalnymi linkami
             for _, row in ed_sl[ed_sl["PODGLĄD"] == True].iterrows():
                 st.markdown(f"<div class='note-box'><b>SLOT: {row['Nr Slotu']} ({row['Auto']})</b></div>", unsafe_allow_html=True)
-                st.info(row['NOTATKA']) # Tu linki będą aktywne i klikalne
+                st.info(row['NOTATKA'])
 
-        # --- ZAKŁADKA 5: BAZA ---
-        with tabs[4]:
+        # --- SEKTYCJA: BAZA ---
+        elif choice == "📚 BAZA":
             ed_full = st.data_editor(df, use_container_width=True, key="ed_full", column_config=column_cfg, hide_index=True)
             edit_trackers["ed_full"] = (df, ed_full)
 
@@ -247,10 +241,8 @@ if check_password():
             if st.button("💾 ZAPISZ WSZYSTKIE ZMIANY", type="primary", use_container_width=True):
                 final_df = df.copy()
                 for k, (orig_df, ed_component) in edit_trackers.items():
-                    state_key = k
-                    if state_key in st.session_state:
-                        changes = st.session_state[state_key].get("edited_rows", {})
-                        
+                    if k in st.session_state:
+                        changes = st.session_state[k].get("edited_rows", {})
                         if k == "ed_empty":
                             for r_idx, c_vals in changes.items():
                                 if "STATUS" in c_vals:
@@ -264,11 +256,10 @@ if check_password():
                 
                 to_save = final_df.copy()
                 if "PODGLĄD" in to_save.columns: to_save = to_save.drop(columns=["PODGLĄD"])
-                
                 conn.update(spreadsheet=URL, data=to_save[all_cols])
                 st.cache_data.clear()
-                st.success("Dane zsynchronizowane z arkuszem!")
+                st.success("Dane zsynchronizowane!")
                 st.rerun()
 
     except Exception as e:
-        st.error(f"Krytyczny błąd aplikacji: {e}")
+        st.error(f"Krytyczny błąd: {e}")
